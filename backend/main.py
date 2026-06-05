@@ -32,9 +32,11 @@ def _startup():
 def _shutdown():
     scheduler.shutdown()
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[FRONTEND_URL, "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -130,7 +132,7 @@ async def google_callback(code: str, request: Request):
         # Store with a simple session key — in prod use proper session management
         session_key = request.cookies.get("exam_sync_session") or secrets.token_urlsafe(24)
         _google_credentials_store[session_key] = creds
-        response = RedirectResponse("http://localhost:5173?google_connected=true")
+        response = RedirectResponse(f"{FRONTEND_URL}?google_connected=true")
         response.set_cookie(
             "exam_sync_session",
             session_key,
