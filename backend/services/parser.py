@@ -3,7 +3,6 @@ import json
 import os
 import re
 import pdfplumber
-import pytesseract
 from PIL import Image
 from models import ExamEntry, ParsedTimetable
 from services.datetime_utils import normalize_date, normalize_time
@@ -164,6 +163,13 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
 
 
 def extract_text_from_image(file_bytes: bytes) -> str:
+    try:
+        import pytesseract
+    except ImportError:
+        raise ValueError(
+            "Image OCR is not available in this deployment. "
+            "Please upload a PDF, Excel, CSV, or text file instead."
+        )
     image = Image.open(io.BytesIO(file_bytes))
     return pytesseract.image_to_string(image)
 

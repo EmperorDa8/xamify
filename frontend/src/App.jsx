@@ -5,7 +5,7 @@ import ExamTable from "./components/ExamTable";
 import ReminderConfig from "./components/ReminderConfig";
 import CalendarSync from "./components/CalendarSync";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL || "/api";
 const STEPS = ["Upload", "Review", "Alerts", "Sync"];
 const ROMAN = ["I", "II", "III", "IV"];
 

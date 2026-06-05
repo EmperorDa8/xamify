@@ -17,13 +17,19 @@ scheduler = BackgroundScheduler(
 
 
 def start() -> None:
-    if not scheduler.running:
-        scheduler.start()
+    try:
+        if not scheduler.running:
+            scheduler.start()
+    except Exception as e:
+        print(f"[scheduler] Could not start (serverless env?): {e}")
 
 
 def shutdown() -> None:
-    if scheduler.running:
-        scheduler.shutdown(wait=False)
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+    except Exception:
+        pass
 
 
 def _reminder_job(to: str, exam: dict) -> None:
@@ -52,14 +58,17 @@ def schedule_exam_reminders(
             if run_dt <= now:
                 continue  # lead time already passed
             job_id = f"reminder:{to}:{exam.course_code}:{exam.date}:{exam.time}:{minutes}"
-            scheduler.add_job(
-                _reminder_job,
-                trigger="date",
-                run_date=run_dt,
-                args=[to, exam_dict],
-                id=job_id,
-                replace_existing=True,
-            )
-            scheduled += 1
+            try:
+                scheduler.add_job(
+                    _reminder_job,
+                    trigger="date",
+                    run_date=run_dt,
+                    args=[to, exam_dict],
+                    id=job_id,
+                    replace_existing=True,
+                )
+                scheduled += 1
+            except Exception as e:
+                print(f"[scheduler] Could not schedule job {job_id}: {e}")
 
     return scheduled
