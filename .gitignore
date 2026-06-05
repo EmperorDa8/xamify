@@ -1,0 +1,29 @@
+# Secrets / environment
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Scheduler job store
+*.sqlite

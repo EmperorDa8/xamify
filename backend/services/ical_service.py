@@ -1,0 +1,49 @@
+from datetime import timedelta
+from icalendar import Calendar, Event, Alarm
+import uuid
+from models import ExamEntry
+from services.datetime_utils import parse_exam_datetime_in_timezone
+
+
+def build_ics(exams: list[ExamEntry], reminder_minutes: list[int], timezone: str = "UTC") -> bytes:
+    cal = Calendar()
+    cal.add("prodid", "-//Exam Timer//exam-timer//EN")
+    cal.add("version", "2.0")
+    cal.add("calscale", "GREGORIAN")
+    cal.add("method", "PUBLISH")
+    cal.add("x-wr-calname", "My Exam Schedule")
+
+    for exam in exams:
+        dt_start = parse_exam_datetime_in_timezone(exam.date, exam.time, timezone)
+        if dt_start is None:
+            continue  # skip rows with unrecoverable date/time rather than failing the batch
+        dt_end = dt_start + timedelta(minutes=exam.duration_minutes or 120)
+
+        event = Event()
+        event.add("uid", str(uuid.uuid4()))
+
+        event.add("dtstart", dt_start)
+        event.add("dtend", dt_end)
+        event.add("summary", f"EXAM: {exam.course_code}")
+
+        description_parts = []
+        if exam.course_name:
+            description_parts.append(f"Course: {exam.course_name}")
+        if exam.venue:
+            description_parts.append(f"Venue: {exam.venue}")
+        description_parts.append(f"Duration: {exam.duration_minutes or 120} minutes")
+        event.add("description", "\n".join(description_parts))
+
+        if exam.venue:
+            event.add("location", exam.venue)
+
+        for minutes in reminder_minutes:
+            alarm = Alarm()
+            alarm.add("action", "DISPLAY")
+            alarm.add("description", f"Exam reminder: {exam.course_code}")
+            alarm.add("trigger", timedelta(minutes=-minutes))
+            event.add_component(alarm)
+
+        cal.add_component(event)
+
+    return cal.to_ical()
