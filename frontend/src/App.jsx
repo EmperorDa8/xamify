@@ -20,6 +20,7 @@ export default function App() {
   const [reminders, setReminders] = useState([1440, 180]);
   const [synced, setSynced] = useState(false);
   const [modelUsed, setModelUsed] = useState(null);
+  const [dateWarnings, setDateWarnings] = useState([]);
 
   const handleUpload = async (file, courseContext = {}) => {
     setLoading(true);
@@ -36,9 +37,26 @@ export default function App() {
       setRegisteredCourses(data.registered_courses || []);
       setUnmatchedCourses(data.unmatched_courses || []);
       setModelUsed(data.model_used || null);
+      setDateWarnings(data.date_warnings || []);
       setStep(1);
     } catch (e) {
-      setError(e.response?.data?.detail || "Couldn't parse that timetable. Check the file and try again.");
+      let msg;
+      if (e.response) {
+        // Backend responded with an error — show its reason.
+        if (e.response.status === 429) {
+          msg = "Too many uploads in a short time. Wait a minute and try again.";
+        } else {
+          msg =
+            e.response.data?.detail ||
+            e.response.data?.error ||
+            `Server error (${e.response.status}). Check the backend logs.`;
+        }
+      } else {
+        // No response at all — the request never reached the backend.
+        msg =
+          "Can't reach the server. Is the backend running and is VITE_API_URL pointing to it?";
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -58,6 +76,7 @@ export default function App() {
     setReminders([1440, 180]);
     setSynced(false);
     setModelUsed(null);
+    setDateWarnings([]);
     setError(null);
   };
 
@@ -157,6 +176,18 @@ export default function App() {
             <div className="stack-lg">
               {modelLabel && (
                 <span className="coord">parsed by {modelLabel}</span>
+              )}
+              {dateWarnings.length > 0 && (
+                <div className="alert warn">
+                  <span className="glyph">⚠</span>
+                  <div>
+                    <b>{dateWarnings.length} date{dateWarnings.length > 1 ? "s" : ""} checked against your timetable.</b>
+                    <ul className="warn-list">
+                      {dateWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                    <span className="coord">Rows flagged with ⚠ couldn't be auto-confirmed — please verify before syncing.</span>
+                  </div>
+                </div>
               )}
               {(registeredCourses.length > 0 || unmatchedCourses.length > 0) && (
                 <div className="match-summary">

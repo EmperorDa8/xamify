@@ -535,6 +535,14 @@ body::before {
 .alert .glyph { font-family: var(--serif); font-style: italic; }
 .alert.error { background: rgba(237, 111, 92, 0.1); border: 1px solid rgba(237, 111, 92, 0.3); color: #b8412e; }
 .alert.success { background: rgba(110, 116, 72, 0.12); border: 1px solid rgba(110, 116, 72, 0.3); color: var(--olive); }
+.alert.warn { background: rgba(214, 158, 46, 0.1); border: 1px solid rgba(214, 158, 46, 0.35); color: #8a6400; }
+.warn-list { margin: 6px 0 8px; padding-left: 18px; }
+.warn-list li { margin: 2px 0; }
+
+/* date verification flag in the exam table */
+.date-cell { display: flex; align-items: center; gap: 6px; }
+.date-flag { color: #b8861b; cursor: help; font-size: 14px; line-height: 1; }
+.cell-input.unverified { border-color: rgba(214, 158, 46, 0.6); background: rgba(214, 158, 46, 0.08); }
 
 /* email alerts */
 .email-alerts {

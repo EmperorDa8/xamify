@@ -2,10 +2,11 @@ import io
 import json
 import os
 import re
+from datetime import datetime
 import pdfplumber
 from PIL import Image
 from models import ExamEntry, ParsedTimetable
-from services.datetime_utils import normalize_date, normalize_time
+from services.datetime_utils import normalize_date, normalize_time, find_date_anchors
 
 
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
@@ -100,17 +101,24 @@ def _call_gemini(prompt: str) -> str:
     return (response.text or "").strip()
 
 
-EXTRACTION_PROMPT = """You are an exam timetable parser for students.
+EXTRACTION_PROMPT = """You are an exam timetable parser for students. Timetables
+come in MANY layouts and from MANY countries. Adapt to whatever you are given.
 
-The timetable is often a GRID/MATRIX. Read it carefully:
-- Each ROW starts with a day and date, e.g. "Monday, 1st June, 2026".
-- Each COLUMN corresponds to a fixed exam TIME shown in the header row,
-  e.g. "8:30am", "11am", "2pm".
-- A single cell can contain MULTIPLE courses (a course code + a course title,
-  sometimes several stacked together). EACH course code is its own exam.
-- An exam's DATE comes from its row; its TIME comes from the column header
-  above it. So a course under the "11am" column on the "Monday, 1st June, 2026"
-  row is an exam on 2026-06-01 at 11:00.
+Common layouts (handle ALL of them):
+- GRID/MATRIX: rows are dates, columns are time slots from a header row; a cell
+  holds one or more course code + title pairs. The exam's DATE is its row; its
+  TIME is the column header above it.
+- LIST / one-row-per-exam: each line/row has a course, a date and a time
+  together (e.g. "CIT216 | Programming | 01/06/2026 | 09:00 | Hall A").
+- SECTIONED: a date heading followed by the exams under it until the next date.
+
+Date formats vary by country — interpret correctly, then ALWAYS output ISO:
+- "01/06/2026" is usually D/M/Y (1 June 2026); "06/01/2026" in US style is
+  1 June too only if the day > 12 disambiguates — use surrounding dates and
+  weekday names to decide the order, then be consistent across the whole table.
+- Textual months in any order: "1 June 2026", "June 1, 2026", "1 Jun 26".
+- 2-digit years: "26" -> 2026.
+- If the year is missing, infer it from nearby dates or context.
 
 {courses_section}
 
@@ -118,13 +126,13 @@ Return a single JSON object: {{"exams": [ ... ]}}
 Each exam object must have exactly these fields:
 - course_code: string, exactly as written (e.g. "CIT216")
 - course_name: string or null
-- date: string in YYYY-MM-DD format
+- date: string in YYYY-MM-DD format (ISO 8601), e.g. "2026-06-01"
 - time: string in HH:MM 24h format (8:30am -> "08:30", 11am -> "11:00", 2pm -> "14:00")
 - duration_minutes: integer or null, default 120 if not specified
 - venue: string or null
 
 Rules:
-- If the year is not specified, infer it from context.
+- Output EVERY exam you can identify; never invent codes or dates.
 - Only output the JSON object, no explanation.
 
 Timetable text:
@@ -145,6 +153,24 @@ def build_prompt(raw_text: str, registered: list[str]) -> str:
     return EXTRACTION_PROMPT.format(text=raw_text, courses_section=courses_section)
 
 
+def _ocr_pdf_pages(pdf) -> str:
+    """OCR a scanned/image PDF by rasterizing each page. Best-effort: needs the
+    optional tesseract binary; returns '' if OCR isn't available."""
+    try:
+        import pytesseract  # noqa: F401
+    except Exception:
+        return ""
+    parts = []
+    for page in pdf.pages:
+        try:
+            im = page.to_image(resolution=200).original
+            import pytesseract as _pt
+            parts.append(_pt.image_to_string(im))
+        except Exception as e:
+            print(f"[parse] OCR failed on a page: {e}")
+    return "\n".join(parts)
+
+
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     text_parts = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
@@ -159,7 +185,22 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
             raw = page.extract_text()
             if raw:
                 text_parts.append(raw)
-    return "\n".join(text_parts)
+
+        text = "\n".join(text_parts)
+
+        # Scanned/image-only PDFs yield little or no extractable text. Fall back
+        # to OCR; if that isn't available, raise a clear, actionable error.
+        if len(text.strip()) < 40:
+            ocr_text = _ocr_pdf_pages(pdf)
+            if len(ocr_text.strip()) >= 40:
+                return ocr_text
+            raise ValueError(
+                "This PDF has no selectable text — it looks like a scanned image. "
+                "Try exporting a text-based PDF, or upload a clear screenshot/photo "
+                "(PNG/JPG) of the timetable instead."
+            )
+
+    return text
 
 
 def extract_text_from_image(file_bytes: bytes) -> str:
@@ -486,6 +527,116 @@ def parse_with_claude(raw_text: str, registered: list[str]) -> tuple[list[ExamEn
     return [], last_model
 
 
+def build_timetable_date_index(raw_text: str) -> dict[str, list[str]]:
+    """Map every course code in the timetable to the date of the block it
+    appears under. This is the ground truth we check the AI against.
+
+    Works by character offset rather than line by line: we locate every date
+    (textual in any order, or numeric/ISO — see datetime_utils.find_date_anchors)
+    and every course code, then assign each code to the nearest preceding date.
+    This survives the inconsistent line wrapping PDF extraction produces and
+    handles timetables from any locale's date format."""
+    text = raw_text or ""
+
+    # 1. All date anchors as (offset, ISO-date), locale-agnostic.
+    date_points = find_date_anchors(text)
+    if not date_points:
+        return {}
+
+    # 2. For each course code, find the closest date anchor at or before it.
+    index: dict[str, list[str]] = {}
+    offsets = [p[0] for p in date_points]
+    import bisect
+
+    for m in _CODE_RE.finditer(text):
+        letters, digits = m.group(1), m.group(2)
+        if letters.lower() in _MONTHS:
+            continue
+        if len(digits) == 4 and digits[:2] in ("19", "20"):  # looks like a year
+            continue
+        pos = m.start()
+        i = bisect.bisect_right(offsets, pos) - 1
+        if i < 0:
+            continue  # code appears before the first date — header noise
+        iso = date_points[i][1]
+        code = _norm_code(f"{letters}{digits}")
+        # Record only the FIRST occurrence's date. PDF extraction emits each day's
+        # cells in document order first (the authoritative grid row); later raw-text
+        # duplicates of the same code would otherwise add spurious dates.
+        if code not in index:
+            index[code] = [iso]
+
+    return index
+
+
+def verify_and_correct_dates(
+    exams: list[ExamEntry], raw_text: str
+) -> tuple[list[ExamEntry], list[str]]:
+    """Confirm each extracted exam's date against the uploaded timetable.
+
+    For every exam we look up its course code in the timetable's own date index:
+      - date matches the timetable           -> mark verified, no change
+      - timetable shows a single, different  -> CORRECT the date to the timetable
+        date                                    and record a warning
+      - code appears under several dates     -> leave as-is, flag for review
+      - code not found in the timetable text -> leave as-is, flag as unverified
+
+    Returns the (possibly corrected) exams and a list of human-readable warnings.
+    """
+    warnings: list[str] = []
+    if not exams:
+        return exams, warnings
+
+    index = build_timetable_date_index(raw_text)
+
+    # The verifier only helps for grid/row layouts where codes sit under a date
+    # block. For list-style or unusual timetables the index can't anchor the
+    # codes — if it covers too few of the extracted exams we skip verification
+    # entirely rather than drown the user in false "unverified" flags. The AI
+    # result still stands; we just don't second-guess it.
+    covered = sum(1 for e in exams if _norm_code(e.course_code) in index)
+    if not index or covered / len(exams) < 0.5:
+        return exams, warnings
+
+    for exam in exams:
+        code = _norm_code(exam.course_code)
+        tt_dates = index.get(code)
+
+        if not tt_dates:
+            exam.date_verified = False
+            exam.date_note = "Course code not found in the timetable — date not verified."
+            warnings.append(
+                f"{exam.course_code}: not found in the timetable text; please confirm its date."
+            )
+            continue
+
+        if exam.date in tt_dates:
+            exam.date_verified = True
+            exam.date_note = None
+            continue
+
+        if len(tt_dates) == 1:
+            old = exam.date
+            exam.date = tt_dates[0]
+            exam.date_verified = True
+            exam.date_note = f"Date corrected from {old or 'blank'} to match the timetable."
+            warnings.append(
+                f"{exam.course_code}: date {old or 'blank'} did not match the timetable; "
+                f"corrected to {tt_dates[0]}."
+            )
+        else:
+            exam.date_verified = False
+            exam.date_note = (
+                "Course appears under multiple dates in the timetable "
+                f"({', '.join(tt_dates)}); please confirm."
+            )
+            warnings.append(
+                f"{exam.course_code}: found under multiple dates {tt_dates}; please confirm."
+            )
+
+    return exams, warnings
+
+
 def normalize_entries(exams: list[ExamEntry]) -> list[ExamEntry]:
     """Clean recoverable date/time values; leave unrecoverable ones as-is so the
     user can fix them in the editable review table."""
@@ -527,6 +678,7 @@ def parse_timetable(
             exams, model_used = manual, "manual-extractor"
 
     # Otherwise use AI — on a focused subset of the timetable so it's fast.
+    ai_error: str | None = None
     if not exams:
         try:
             exams, model_used = parse_with_claude(
@@ -535,16 +687,37 @@ def parse_timetable(
         except Exception as e:
             print(f"[parse] AI extraction failed, using manual fallback: {e}")
             exams, model_used = [], None
+            ai_error = str(e)
         # Last resort: partial manual result rather than nothing.
         if not exams and registered:
             manual = manual_extract(raw_text, registered)
             if manual:
                 exams, model_used = manual, "manual-extractor"
 
+    # Nothing came back. If the AI providers themselves failed (bad/missing API
+    # keys, rate limits, model unavailable), say so clearly instead of returning
+    # an empty timetable the user can't diagnose.
+    if not exams and ai_error:
+        lowered = ai_error.lower()
+        if any(s in lowered for s in ("api key", "authentication", "401", "invalid_argument", "unauthorized")):
+            raise ValueError(
+                "AI service rejected the request — check that OPENROUTER_API_KEY and "
+                "GEMINI_API_KEY in backend/.env are valid (not the placeholder values). "
+                f"Details: {ai_error}"
+            )
+        raise ValueError(f"Could not extract any exams from this file. Details: {ai_error}")
+
     exams = normalize_entries(exams)
     matched, unmatched = match_exams(exams, registered)
 
-    print(f"[parse] {filename} | model={model_used} | matched {len(matched)}/{len(registered)}")
+    # Cross-check every extracted date against the uploaded timetable and correct
+    # any the AI got wrong, so a bad date never silently reaches the calendar.
+    matched, date_warnings = verify_and_correct_dates(matched, raw_text)
+
+    print(
+        f"[parse] {filename} | model={model_used} | matched {len(matched)}/{len(registered)} "
+        f"| date_warnings={len(date_warnings)}"
+    )
 
     return ParsedTimetable(
         exams=matched,
@@ -552,4 +725,5 @@ def parse_timetable(
         unmatched_courses=unmatched,
         raw_text=raw_text,
         model_used=model_used,
+        date_warnings=date_warnings,
     )

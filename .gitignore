@@ -27,3 +27,5 @@ Thumbs.db
 
 # Scheduler job store
 *.sqlite
+
+.vercel

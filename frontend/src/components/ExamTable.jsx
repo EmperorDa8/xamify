@@ -69,7 +69,16 @@ export default function ExamTable({ exams, onChange }) {
                 </td>
                 <td><Cell className="code" value={exam.course_code} onChange={(v) => updateExam(i, "course_code", v)} /></td>
                 <td><Cell value={exam.course_name} onChange={(v) => updateExam(i, "course_name", v)} /></td>
-                <td><Cell type="date" value={exam.date} onChange={(v) => updateExam(i, "date", v)} /></td>
+                <td>
+                  <div className="date-cell">
+                    <Cell type="date" value={exam.date}
+                      className={exam.date_verified === false ? "unverified" : ""}
+                      onChange={(v) => updateExam(i, "date", v)} />
+                    {exam.date_verified === false && (
+                      <span className="date-flag" title={exam.date_note || "Date could not be confirmed against the timetable — please check."}>⚠</span>
+                    )}
+                  </div>
+                </td>
                 <td><Cell type="time" value={exam.time} onChange={(v) => updateExam(i, "time", v)} /></td>
                 <td><Cell type="number" value={exam.duration_minutes}
                   onChange={(v) => updateExam(i, "duration_minutes", parseInt(v) || 120)} /></td>

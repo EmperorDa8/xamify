@@ -9,6 +9,12 @@ class ExamEntry(BaseModel):
     time: str  # HH:MM
     duration_minutes: Optional[int] = 120
     venue: Optional[str] = None
+    # Set by the date verifier (services.parser.verify_and_correct_dates):
+    #   True  -> date confirmed against the uploaded timetable
+    #   False -> could not be confirmed; needs the user's attention
+    #   None  -> not checked
+    date_verified: Optional[bool] = None
+    date_note: Optional[str] = None  # human-readable explanation when not a clean match
 
 
 class ParsedTimetable(BaseModel):
@@ -19,6 +25,7 @@ class ParsedTimetable(BaseModel):
     registered_courses: list[str] = Field(default_factory=list)
     unmatched_courses: list[str] = Field(default_factory=list)
     model_used: Optional[str] = None  # which LLM served this parse
+    date_warnings: list[str] = Field(default_factory=list)  # date checks that need review
 
 
 class SyncRequest(BaseModel):

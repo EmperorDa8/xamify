@@ -4,6 +4,9 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, RedirectResponse
 from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from models import (
     ParsedTimetable,
     SyncRequest,
@@ -17,10 +20,18 @@ from services.ical_service import build_ics
 from services.google_calendar import get_auth_url, exchange_code, sync_exams_to_google
 from services.email_service import send_summary_email
 from services import scheduler
+from services import token_store
 
 load_dotenv()
 
+# Reject uploads larger than this to protect memory and AI token spend.
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "20")) * 1024 * 1024
+
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="Exam Timer API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.on_event("startup")
@@ -38,12 +49,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL, "http://localhost:5173"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
-
-# Temporary in-memory store for OAuth credentials per session (local dev only)
-_google_credentials_store: dict[str, dict] = {}
 
 
 @app.get("/health")
@@ -52,7 +60,9 @@ def health():
 
 
 @app.post("/parse", response_model=ParsedTimetable)
+@limiter.limit("5/minute")
 async def parse(
+    request: Request,
     file: UploadFile = File(...),
     courses_file: UploadFile | None = File(None),
     courses_text: str = Form(""),
@@ -63,12 +73,22 @@ async def parse(
         raise HTTPException(status_code=400, detail=f"Unsupported file type: .{ext}")
 
     file_bytes = await file.read()
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
     courses_bytes = None
     if courses_file and courses_file.filename:
         courses_ext = courses_file.filename.rsplit(".", 1)[-1].lower() if "." in courses_file.filename else ""
         if courses_ext not in allowed:
             raise HTTPException(status_code=400, detail=f"Unsupported course-list file type: .{courses_ext}")
         courses_bytes = await courses_file.read()
+        if len(courses_bytes) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Course list file too large. Maximum size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+            )
 
     try:
         result = parse_timetable(
@@ -95,7 +115,8 @@ async def download_ics(body: SyncRequest):
 
 
 @app.post("/alerts/email", response_model=EmailAlertResult)
-async def email_alerts(body: EmailAlertRequest):
+@limiter.limit("5/minute")
+async def email_alerts(request: Request, body: EmailAlertRequest):
     if not body.exams:
         raise HTTPException(status_code=400, detail="No exams to send.")
     try:
@@ -129,9 +150,9 @@ def google_auth():
 async def google_callback(code: str, request: Request):
     try:
         creds = exchange_code(code)
-        # Store with a simple session key — in prod use proper session management
+        # Persist credentials keyed to the session cookie so they survive restarts.
         session_key = request.cookies.get("exam_sync_session") or secrets.token_urlsafe(24)
-        _google_credentials_store[session_key] = creds
+        token_store.save_credentials(session_key, creds)
         response = RedirectResponse(f"{FRONTEND_URL}?google_connected=true")
         response.set_cookie(
             "exam_sync_session",
@@ -148,7 +169,7 @@ async def google_callback(code: str, request: Request):
 @app.post("/sync/google", response_model=SyncResult)
 async def sync_google(body: SyncRequest, request: Request):
     session_key = request.cookies.get("exam_sync_session")
-    creds = _google_credentials_store.get(session_key)
+    creds = token_store.get_credentials(session_key)
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated with Google. Connect Google Calendar first.")
 
@@ -166,5 +187,5 @@ async def sync_google(body: SyncRequest, request: Request):
 @app.get("/auth/google/status")
 def google_status(request: Request):
     session_key = request.cookies.get("exam_sync_session")
-    connected = bool(session_key and session_key in _google_credentials_store)
+    connected = token_store.has_credentials(session_key)
     return {"connected": connected}
