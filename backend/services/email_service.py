@@ -29,6 +29,10 @@ def _send_via_resend(to: str, subject: str, text: str, ics_bytes: bytes | None) 
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # Resend is fronted by Cloudflare, which blocks the default
+            # "Python-urllib" agent (403 code 1010). Send a normal UA.
+            "User-Agent": "Xamify/1.0 (+https://xamify-ten.vercel.app)",
+            "Accept": "application/json",
         },
         method="POST",
     )
