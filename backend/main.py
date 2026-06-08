@@ -45,9 +45,20 @@ def _shutdown():
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+# Allow the configured production frontend plus localhost. Vercel also issues a
+# new preview domain per deploy (e.g. xamify-<hash>-<team>.vercel.app), so we
+# additionally allow this project's Vercel subdomains via a regex — overridable
+# with FRONTEND_URL_REGEX. This stops CORS from breaking on every redeploy.
+_allowed_origins = list({FRONTEND_URL, "http://localhost:5173"})
+_origin_regex = os.getenv(
+    "FRONTEND_URL_REGEX",
+    r"https://xamify[\w-]*\.vercel\.app",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:5173"],
+    allow_origins=_allowed_origins,
+    allow_origin_regex=_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],

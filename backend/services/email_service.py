@@ -1,12 +1,46 @@
+import base64
+import json
 import os
 import smtplib
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 
 from models import ExamEntry
 from services.ical_service import build_ics
 
+RESEND_ENDPOINT = "https://api.resend.com/emails"
 
-def _config() -> dict:
+
+def _send_via_resend(to: str, subject: str, text: str, ics_bytes: bytes | None) -> None:
+    """Send over Resend's HTTPS API. Works on hosts (e.g. Render) that block
+    outbound SMTP ports, since this rides on port 443."""
+    api_key = os.getenv("RESEND_API_KEY")
+    # Without a verified domain, Resend only allows its shared onboarding sender.
+    sender = os.getenv("RESEND_FROM") or "Xamify <onboarding@resend.dev>"
+    payload = {"from": sender, "to": [to], "subject": subject, "text": text}
+    if ics_bytes:
+        payload["attachments"] = [
+            {"filename": "exams.ics", "content": base64.b64encode(ics_bytes).decode()}
+        ]
+    req = urllib.request.Request(
+        RESEND_ENDPOINT,
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            resp.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        raise RuntimeError(f"Resend API error {e.code}: {detail}")
+
+
+def _send_via_smtp(to: str, subject: str, text: str, ics_bytes: bytes | None) -> None:
     host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     port = int(os.getenv("SMTP_PORT", "587"))
     user = os.getenv("SMTP_USER")
@@ -14,30 +48,29 @@ def _config() -> dict:
     sender = os.getenv("SMTP_FROM", user or "")
     if not user or not password:
         raise ValueError(
-            "Email is not configured. Set SMTP_USER and SMTP_PASSWORD (a Gmail "
-            "app password) in backend/.env."
+            "Email is not configured. Set RESEND_API_KEY (recommended for hosting), "
+            "or SMTP_USER + SMTP_PASSWORD for local SMTP."
         )
-    return {"host": host, "port": port, "user": user, "password": password, "sender": sender}
-
-
-def _send(to: str, subject: str, text: str, ics_bytes: bytes | None = None) -> None:
-    cfg = _config()
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = cfg["sender"]
+    msg["From"] = sender
     msg["To"] = to
     msg.set_content(text)
     if ics_bytes:
-        msg.add_attachment(
-            ics_bytes,
-            maintype="text",
-            subtype="calendar",
-            filename="exams.ics",
-        )
-    with smtplib.SMTP(cfg["host"], cfg["port"]) as server:
+        msg.add_attachment(ics_bytes, maintype="text", subtype="calendar", filename="exams.ics")
+    with smtplib.SMTP(host, port) as server:
         server.starttls()
-        server.login(cfg["user"], cfg["password"])
+        server.login(user, password)
         server.send_message(msg)
+
+
+def _send(to: str, subject: str, text: str, ics_bytes: bytes | None = None) -> None:
+    """Prefer the Resend HTTP API when configured (works on Render and other
+    hosts that block SMTP); otherwise fall back to direct SMTP for local dev."""
+    if os.getenv("RESEND_API_KEY"):
+        _send_via_resend(to, subject, text, ics_bytes)
+    else:
+        _send_via_smtp(to, subject, text, ics_bytes)
 
 
 def _format_exam(exam: ExamEntry) -> str:
