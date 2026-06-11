@@ -637,6 +637,35 @@ def verify_and_correct_dates(
     return exams, warnings
 
 
+def check_duplicate_dates(exams: list[ExamEntry]) -> list[str]:
+    """Flag any courses that landed on the same date. Each course should sit on
+    its own exam day — two codes sharing a date usually means the extractor
+    mis-anchored one of them, so mark both for review instead of letting a
+    wrong date reach the calendar silently."""
+    warnings: list[str] = []
+    by_date: dict[str, list[ExamEntry]] = {}
+    for exam in exams:
+        if exam.date:
+            by_date.setdefault(exam.date, []).append(exam)
+
+    for date, group in by_date.items():
+        if len(group) < 2:
+            continue
+        codes = ", ".join(e.course_code for e in group)
+        warnings.append(
+            f"{codes} all fall on {date} — confirm each date; courses usually "
+            "sit on separate exam days."
+        )
+        for exam in group:
+            exam.date_verified = False
+            note = f"Shares {date} with: " + ", ".join(
+                e.course_code for e in group if e is not exam
+            )
+            exam.date_note = f"{exam.date_note} {note}".strip() if exam.date_note else note
+
+    return warnings
+
+
 def normalize_entries(exams: list[ExamEntry]) -> list[ExamEntry]:
     """Clean recoverable date/time values; leave unrecoverable ones as-is so the
     user can fix them in the editable review table."""
@@ -713,6 +742,7 @@ def parse_timetable(
     # Cross-check every extracted date against the uploaded timetable and correct
     # any the AI got wrong, so a bad date never silently reaches the calendar.
     matched, date_warnings = verify_and_correct_dates(matched, raw_text)
+    date_warnings += check_duplicate_dates(matched)
 
     print(
         f"[parse] {filename} | model={model_used} | matched {len(matched)}/{len(registered)} "

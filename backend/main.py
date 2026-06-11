@@ -65,6 +65,37 @@ app.add_middleware(
 )
 
 
+def _validate_exam_schedule(exams) -> None:
+    """Block calendar/email export of a schedule with invalid or clashing
+    dates. The review table lets the user fix anything flagged here, so a bad
+    date never reaches their calendar silently."""
+    from services.datetime_utils import parse_exam_datetime
+
+    problems: list[str] = []
+    by_date: dict[str, list[str]] = {}
+    for exam in exams:
+        if parse_exam_datetime(exam.date, exam.time) is None:
+            problems.append(
+                f"{exam.course_code}: invalid or missing date/time "
+                f"(date={exam.date!r}, time={exam.time!r})."
+            )
+        if exam.date:
+            by_date.setdefault(exam.date, []).append(exam.course_code)
+
+    for date, codes in by_date.items():
+        if len(codes) > 1:
+            problems.append(
+                f"{', '.join(codes)} share the same date ({date}). "
+                "Each course must be on its own exam day — fix the dates in the review table."
+            )
+
+    if problems:
+        raise HTTPException(
+            status_code=422,
+            detail="Schedule check failed: " + " | ".join(problems),
+        )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -117,6 +148,7 @@ async def parse(
 
 @app.post("/download/ics")
 async def download_ics(body: SyncRequest):
+    _validate_exam_schedule(body.exams)
     ics_bytes = build_ics(body.exams, body.reminder_minutes, body.timezone)
     return Response(
         content=ics_bytes,
@@ -130,6 +162,7 @@ async def download_ics(body: SyncRequest):
 async def email_alerts(request: Request, body: EmailAlertRequest):
     if not body.exams:
         raise HTTPException(status_code=400, detail="No exams to send.")
+    _validate_exam_schedule(body.exams)
     try:
         send_summary_email(body.email, body.exams, body.reminder_minutes, body.timezone)
         scheduled = scheduler.schedule_exam_reminders(
@@ -184,6 +217,7 @@ async def sync_google(body: SyncRequest, request: Request):
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated with Google. Connect Google Calendar first.")
 
+    _validate_exam_schedule(body.exams)
     try:
         event_ids = sync_exams_to_google(creds, body.exams, body.reminder_minutes, body.timezone)
         return SyncResult(
