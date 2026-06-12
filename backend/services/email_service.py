@@ -17,7 +17,7 @@ def _send_via_resend(to: str, subject: str, text: str, ics_bytes: bytes | None) 
     outbound SMTP ports, since this rides on port 443."""
     api_key = os.getenv("RESEND_API_KEY")
     # Without a verified domain, Resend only allows its shared onboarding sender.
-    sender = os.getenv("RESEND_FROM") or "Xamify <onboarding@resend.dev>"
+    sender = os.getenv("RESEND_FROM") or "Xamio <onboarding@resend.dev>"
     payload = {"from": sender, "to": [to], "subject": subject, "text": text}
     if ics_bytes:
         payload["attachments"] = [
@@ -31,7 +31,7 @@ def _send_via_resend(to: str, subject: str, text: str, ics_bytes: bytes | None) 
             "Content-Type": "application/json",
             # Resend is fronted by Cloudflare, which blocks the default
             # "Python-urllib" agent (403 code 1010). Send a normal UA.
-            "User-Agent": "Xamify/1.0 (+https://xamify-ten.vercel.app)",
+            "User-Agent": "Xamio/1.0 (+https://xamify-ten.vercel.app)",
             "Accept": "application/json",
         },
         method="POST",
@@ -99,7 +99,7 @@ def send_summary_email(
         + "\n".join(lines)
         + "\n\nThe attached exams.ics can be imported into any calendar app.\n"
         + "You will also receive reminder emails before each exam.\n\n"
-        + "— ExamSync"
+        + "— Xamio"
     )
     ics = build_ics(exams, reminder_minutes, timezone)
     _send(to, f"Your exam schedule — {len(exams)} exam(s)", body, ics_bytes=ics)
@@ -119,6 +119,6 @@ def send_reminder_email(to: str, exam: dict) -> None:
         f"  {title}\n"
         f"  {date} at {time}\n"
         + (f"  Venue: {venue}\n" if venue else "")
-        + "\nGood luck!\n\n— ExamSync"
+        + "\nGood luck!\n\n— Xamio"
     )
     _send(to, f"Exam reminder: {code} on {date} at {time}", body)

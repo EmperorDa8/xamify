@@ -96,7 +96,7 @@ export default function App() {
       <div className="shell">
         <div className="topbar">
           <div className="container topbar-inner">
-            <span><b className="coral">●</b> Xamify</span>
+            <span><b className="coral">●</b> Xamio</span>
             <span className="mid">
               <span>Parsed by AI</span>
               <span>Course matching</span>
@@ -110,7 +110,7 @@ export default function App() {
           <div className="container nav-inner">
             <a className="brand" href="#" onClick={(event) => { event.preventDefault(); reset(); }}>
               <span className="brand-mark">X</span>
-              Xamify
+              Xamio
               <span className="brand-meta">Timetable<b>to Calendar</b></span>
             </a>
             {step > 0 && <button className="nav-reset" onClick={reset}>Start over</button>}

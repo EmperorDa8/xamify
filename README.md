@@ -1,11 +1,11 @@
 <h1 align="center">
-  <img src="frontend/public/hero-illustration.png" alt="Xamify" width="60" /><br/>
-  Xamify
+  <img src="frontend/public/hero-illustration.png" alt="Xamio" width="60" /><br/>
+  Xamio
 </h1>
 
 <p align="center">
   <strong>Upload your exam timetable. AI reads it. Your calendar gets it.</strong><br/>
-  Never miss an exam — Xamify turns any timetable file into Google Calendar events and email reminders in under a minute.
+  Never miss an exam — Xamio turns any timetable file into Google Calendar events and email reminders in under a minute.
 </p>
 
 <p align="center">
@@ -16,13 +16,13 @@
 
 ---
 
-## What is Xamify?
+## What is Xamio?
 
 Universities hand you a timetable. They expect you to manually copy every exam into your calendar. Nobody does. People miss exams.
 
-**Xamify fixes that.**
+**Xamio fixes that.**
 
-Drop in your timetable — PDF, image, spreadsheet, Word doc, whatever — and Xamify's AI pipeline extracts every exam, matches it to the courses you're actually registered for, and exports everything straight to Google Calendar with email reminders timed exactly how you want them.
+Drop in your timetable — PDF, image, spreadsheet, Word doc, whatever — and Xamio's AI pipeline extracts every exam, matches it to the courses you're actually registered for, and exports everything straight to Google Calendar with email reminders timed exactly how you want them.
 
 ---
 
@@ -31,7 +31,7 @@ Drop in your timetable — PDF, image, spreadsheet, Word doc, whatever — and X
 | Feature | Details |
 |---|---|
 | 🤖 **AI Parsing** | Uses OpenRouter (GPT-4o / Claude) with Gemini 2.5 Flash as fallback, plus an offline manual extractor |
-| 📄 **Any Format** | PDF, PNG, JPG, XLSX, CSV, DOCX, TXT — if it has exam data, Xamify can read it |
+| 📄 **Any Format** | PDF, PNG, JPG, XLSX, CSV, DOCX, TXT — if it has exam data, Xamio can read it |
 | 🎯 **Course Matching** | Upload your registered courses; AI matches them to the full timetable and filters only your exams |
 | 📅 **Google Calendar Sync** | One-click OAuth — all your exams land in your calendar with proper titles, times, and venues |
 | 📥 **ICS Download** | No Google account? Download a standard `.ics` file and import it anywhere |
@@ -165,4 +165,4 @@ Pull requests are welcome. For major changes, please open an issue first.
 
 ## License
 
-MIT © Xamify
+MIT © Xamio
