@@ -89,7 +89,21 @@ export default function CalendarSync({ exams, reminders, onSuccess, defaultEmail
       setMessage({ type: "success", text: data.message });
       onSuccess?.("email");
     } catch (e) {
-      setMessage({ type: "error", text: e.response?.data?.detail || "Could not send email alerts." });
+      let text;
+      if (e.response) {
+        if (e.response.status === 429) {
+          text = "Too many attempts in a short time. Please wait a minute and try again.";
+        } else {
+          text =
+            e.response.data?.detail ||
+            e.response.data?.error ||
+            `Server error (${e.response.status}). Please try again.`;
+        }
+      } else {
+        // No response — usually the backend is waking from sleep (free tier).
+        text = "Couldn't reach the server — it may be waking up. Wait ~30 seconds and try again.";
+      }
+      setMessage({ type: "error", text });
     } finally {
       setEmailing(false);
     }
