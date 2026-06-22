@@ -4,12 +4,16 @@ import UploadZone from "./components/UploadZone";
 import ExamTable from "./components/ExamTable";
 import ReminderConfig from "./components/ReminderConfig";
 import CalendarSync from "./components/CalendarSync";
+import Auth from "./components/Auth";
+import { useAuth } from "./auth/AuthProvider";
+import { logEvent } from "./lib/analytics";
 
 const API = import.meta.env.VITE_API_URL || "/api";
 const STEPS = ["Upload", "Review", "Alerts", "Sync"];
 const ROMAN = ["I", "II", "III", "IV"];
 
 export default function App() {
+  const { user, loading: authLoading, signOut } = useAuth();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -38,6 +42,10 @@ export default function App() {
       setUnmatchedCourses(data.unmatched_courses || []);
       setModelUsed(data.model_used || null);
       setDateWarnings(data.date_warnings || []);
+      logEvent("upload", {
+        exams: data.exams?.length ?? 0,
+        model: data.model_used || null,
+      });
       setStep(1);
     } catch (e) {
       let msg;
@@ -88,6 +96,16 @@ export default function App() {
         : `OpenRouter (${modelUsed})`
     : null;
 
+  // Auth gate: the whole app requires a signed-in user.
+  if (authLoading) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-loading"><span className="pulse" /> Loading…</div>
+      </div>
+    );
+  }
+  if (!user) return <Auth />;
+
   return (
     <>
       <div className="side-rail left"><span className="rail-text">Exam Schedule - {new Date().getFullYear()}</span></div>
@@ -102,7 +120,11 @@ export default function App() {
               <span>Course matching</span>
               <span>BYO Calendar</span>
             </span>
-            <span className="right"><span className="pulse" />Session live</span>
+            <span className="right auth-chip">
+              <span className="pulse" />
+              <span className="auth-email">{user.email}</span>
+              <button className="auth-signout" onClick={signOut}>Sign out</button>
+            </span>
           </div>
         </div>
 
@@ -241,7 +263,14 @@ export default function App() {
                   <p className="big"><b>You're all set.</b> <span className="roman">Good luck on your exams.</span></p>
                 </div>
               )}
-              <CalendarSync exams={selectedExams} reminders={reminders} onSuccess={() => setSynced(true)} />
+              <CalendarSync
+                exams={selectedExams}
+                reminders={reminders}
+                onSuccess={() => {
+                  setSynced(true);
+                  logEvent("sync", { exams: selectedExams.length });
+                }}
+              />
               <div className="row-between">
                 <button className="link-back" onClick={() => setStep(2)}>Back</button>
               </div>
