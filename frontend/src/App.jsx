@@ -4,7 +4,7 @@ import UploadZone from "./components/UploadZone";
 import ExamTable from "./components/ExamTable";
 import ReminderConfig from "./components/ReminderConfig";
 import CalendarSync from "./components/CalendarSync";
-import Auth from "./components/Auth";
+import PublicSite from "./components/PublicSite";
 import { useAuth } from "./auth/AuthProvider";
 import { logEvent } from "./lib/analytics";
 
@@ -104,7 +104,7 @@ export default function App() {
       </div>
     );
   }
-  if (!user) return <Auth />;
+  if (!user) return <PublicSite />;
 
   return (
     <>

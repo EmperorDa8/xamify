@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
 
-export default function Auth() {
-  const [mode, setMode] = useState("signin"); // "signin" | "signup"
+export default function Auth({ initialMode = "signin", onBack }) {
+  const [mode, setMode] = useState(initialMode); // "signin" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -54,6 +54,11 @@ export default function Auth() {
   return (
     <div className="auth-wrap">
       <div className="auth-card">
+        {onBack && (
+          <button type="button" className="link-back auth-back" onClick={onBack}>
+            ← Back to home
+          </button>
+        )}
         <div className="auth-head">
           <span className="brand-mark">X</span>
           <h1>{isSignup ? "Create your account" : "Welcome back"}</h1>
