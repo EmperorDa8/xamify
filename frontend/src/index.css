@@ -738,3 +738,126 @@ table.exams td { padding: 10px 16px; vertical-align: middle; }
 @media (prefers-reduced-motion: reduce) {
   .upload-mark.spin { animation: none; }
 }
+
+/* ============================================================
+   Auth screen + signed-in chip
+   ============================================================ */
+.auth-wrap {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+.auth-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--bone);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  padding: 40px 38px;
+}
+.auth-head { text-align: center; margin-bottom: 26px; }
+.auth-head .brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 16px;
+  background: var(--ink);
+  color: var(--bone);
+  font-family: var(--sans);
+  font-weight: 800;
+  border-radius: 4px;
+}
+.auth-head h1 {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.auth-head .lead { font-size: 14px; color: var(--ink-mute); }
+
+.btn-google {
+  width: 100%;
+  justify-content: center;
+  gap: 10px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.btn-google:hover { background: var(--paper-warm); }
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+
+.auth-form { display: flex; flex-direction: column; gap: 14px; }
+.auth-field { display: flex; flex-direction: column; gap: 6px; }
+.auth-field > span {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.auth-field input {
+  font-family: var(--body);
+  font-size: 15px;
+  padding: 11px 13px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  transition: border-color 0.15s;
+}
+.auth-field input:focus { outline: none; border-color: var(--coral); }
+.auth-form .btn-primary { width: 100%; justify-content: center; margin-top: 4px; }
+
+.auth-switch {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+
+/* signed-in chip in the topbar */
+.auth-chip { display: inline-flex; align-items: center; gap: 10px; }
+.auth-email { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-signout {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-mute);
+  background: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.auth-signout:hover { color: var(--coral); border-color: var(--coral); }
