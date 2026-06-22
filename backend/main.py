@@ -45,14 +45,18 @@ def _shutdown():
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-# Allow the configured production frontend plus localhost. Vercel also issues a
-# new preview domain per deploy (e.g. xamify-<hash>-<team>.vercel.app), so we
-# additionally allow this project's Vercel subdomains via a regex — overridable
-# with FRONTEND_URL_REGEX. This stops CORS from breaking on every redeploy.
-_allowed_origins = list({FRONTEND_URL, "http://localhost:5173"})
+# Allow the configured production frontend plus localhost. The production site
+# is served from the xamio.app custom domain; Vercel also issues a new preview
+# domain per deploy (e.g. xamify-<hash>-<team>.vercel.app). We allow the custom
+# domain (apex + any subdomain) and this project's Vercel subdomains via a regex
+# — overridable with FRONTEND_URL_REGEX. This stops CORS from breaking on every
+# redeploy or domain change.
+_allowed_origins = list(
+    {FRONTEND_URL, "https://xamio.app", "https://www.xamio.app", "http://localhost:5173"}
+)
 _origin_regex = os.getenv(
     "FRONTEND_URL_REGEX",
-    r"https://xamify[\w-]*\.vercel\.app",
+    r"https://([\w-]+\.)?xamio\.app|https://xamify[\w-]*\.vercel\.app",
 )
 
 app.add_middleware(
