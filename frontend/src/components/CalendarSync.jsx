@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-const API = "http://localhost:8000";
+// Same base as App.jsx: the deployed API (VITE_API_URL) or the same-origin
+// "/api" proxy. Hardcoding localhost here broke calendar/ics/email in prod.
+const API = import.meta.env.VITE_API_URL || "/api";
 
 export default function CalendarSync({ exams, reminders, onSuccess, defaultEmail = "" }) {
   const [googleConnected, setGoogleConnected] = useState(false);
