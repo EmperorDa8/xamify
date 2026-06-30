@@ -30,6 +30,37 @@ export default function UploadZone({ onUpload, loading }) {
 
   return (
     <div className="upload-grid">
+      {/* Registered courses come first so users add their course codes before
+          dropping the timetable (which auto-submits the parse). */}
+      <div className="course-card">
+        <div>
+          <h3>1. Registered courses</h3>
+          <p className="sub">Start here — paste your course codes (or attach your registration file) so we match only your exams. Then upload your timetable.</p>
+        </div>
+
+        <textarea
+          value={coursesText}
+          onChange={(event) => setCoursesText(event.target.value)}
+          placeholder={"CSC 201\nMTH 204\nPHY 101"}
+          disabled={loading}
+        />
+
+        <input
+          ref={coursesInputRef}
+          type="file"
+          accept={ACCEPTED}
+          hidden
+          onChange={(event) => setCoursesFile(event.target.files?.[0] || null)}
+        />
+
+        <div className="course-actions">
+          <button type="button" className="btn btn-ghost" disabled={loading} onClick={() => coursesInputRef.current?.click()}>
+            Attach file
+          </button>
+          {coursesFile && <span className="file-name">{coursesFile.name}</span>}
+        </div>
+      </div>
+
       <div
         onClick={() => timetableInputRef.current?.click()}
         onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
@@ -60,41 +91,12 @@ export default function UploadZone({ onUpload, loading }) {
         </div>
 
         <div style={{ textAlign: "center" }}>
-          <h3>{loading ? <>Reading your <em>timetable</em>...</> : <>Drop your <em>timetable</em> here</>}</h3>
+          <h3>{loading ? <>Reading your <em>timetable</em>...</> : <>2. Drop your <em>timetable</em> here</>}</h3>
           <p className="sub">PDF, image, Excel, CSV, DOCX, or TXT parsed into exact exam dates</p>
           {timetableFile && <p className="file-name">{timetableFile.name}</p>}
         </div>
 
         {!loading && <span className="chip">Click to browse</span>}
-      </div>
-
-      <div className="course-card">
-        <div>
-          <h3>Registered courses</h3>
-          <p className="sub">Paste course codes or upload your course registration file. Matching happens before review.</p>
-        </div>
-
-        <textarea
-          value={coursesText}
-          onChange={(event) => setCoursesText(event.target.value)}
-          placeholder={"CSC 201\nMTH 204\nPHY 101"}
-          disabled={loading}
-        />
-
-        <input
-          ref={coursesInputRef}
-          type="file"
-          accept={ACCEPTED}
-          hidden
-          onChange={(event) => setCoursesFile(event.target.files?.[0] || null)}
-        />
-
-        <div className="course-actions">
-          <button type="button" className="btn btn-ghost" disabled={loading} onClick={() => coursesInputRef.current?.click()}>
-            Attach file
-          </button>
-          {coursesFile && <span className="file-name">{coursesFile.name}</span>}
-        </div>
       </div>
     </div>
   );

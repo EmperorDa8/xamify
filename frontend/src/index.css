@@ -417,7 +417,9 @@ body::before {
 /* upload zone */
 .upload-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  /* Registered-courses card first (narrow, left), timetable dropzone second
+     (wide, right) — guide users to enter courses before uploading. */
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
   gap: 18px;
   align-items: stretch;
 }
