@@ -41,6 +41,15 @@ def _send_via_resend(to: str, subject: str, text: str, ics_bytes: bytes | None) 
             resp.read()
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
+        # Resend rejects any recipient other than the account owner until a
+        # sending domain is verified. Surface a clear, user-friendly message
+        # (raised as ValueError -> 501) instead of a raw API dump.
+        if e.code == 403 and ("verify a domain" in detail or "your own email address" in detail):
+            raise ValueError(
+                "Email alerts aren't available for this address yet. For now, use "
+                "“Download .ics” or “Connect Google Calendar” to add your exams — "
+                "email reminders for everyone are coming soon."
+            )
         raise RuntimeError(f"Resend API error {e.code}: {detail}")
 
 

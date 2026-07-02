@@ -8,17 +8,47 @@ from models import ExamEntry
 from services.datetime_utils import parse_exam_datetime_in_timezone
 
 # Persistent job store so scheduled reminders survive a backend restart.
-_JOBSTORE_URL = os.getenv("SCHEDULER_DB_URL", "sqlite:///reminders.sqlite")
+# Prefers DATABASE_URL (one env var upgrades this AND token_store to Postgres —
+# Render's free-tier disk is ephemeral, so SQLite there is wiped per deploy).
+_JOBSTORE_URL = (
+    os.getenv("SCHEDULER_DB_URL")
+    or os.getenv("DATABASE_URL")
+    or "sqlite:///reminders.sqlite"
+)
+if _JOBSTORE_URL.startswith("postgres://"):
+    _JOBSTORE_URL = _JOBSTORE_URL.replace("postgres://", "postgresql://", 1)
+
+# Same private schema as token_store: on Supabase, `public` is exposed via
+# PostgREST, so app tables live in a schema the REST API can't see.
+_PG_SCHEMA = "xamio" if _JOBSTORE_URL.startswith("postgresql") else None
 
 scheduler = BackgroundScheduler(
-    jobstores={"default": SQLAlchemyJobStore(url=_JOBSTORE_URL)},
+    jobstores={
+        "default": SQLAlchemyJobStore(url=_JOBSTORE_URL, tableschema=_PG_SCHEMA)
+    },
     job_defaults={"coalesce": True, "misfire_grace_time": 3600, "max_instances": 5},
 )
+
+
+def _ensure_schema() -> None:
+    """Create the private schema before APScheduler creates its table in it
+    (SQLAlchemyJobStore creates the table but not the schema)."""
+    if not _PG_SCHEMA:
+        return
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(_JOBSTORE_URL, future=True)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{_PG_SCHEMA}"'))
+    finally:
+        engine.dispose()
 
 
 def start() -> None:
     try:
         if not scheduler.running:
+            _ensure_schema()
             scheduler.start()
     except Exception as e:
         print(f"[scheduler] Could not start (serverless env?): {e}")
@@ -44,6 +74,14 @@ def schedule_exam_reminders(
 ) -> int:
     """Schedule a reminder email for each (exam, lead-time) pair whose fire time
     is still in the future. Returns the number of reminders scheduled."""
+    # On a serverless host the background scheduler never started (start()
+    # swallows that), and each request runs in a throwaway process — a job added
+    # here would never fire. Don't queue reminders we can't deliver; the caller
+    # reports 0 honestly instead of promising emails that never arrive.
+    if not scheduler.running:
+        print("[scheduler] not running (serverless host?) — skipping timed reminders.")
+        return 0
+
     now = datetime.now(dt_timezone.utc)
     scheduled = 0
 

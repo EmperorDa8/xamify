@@ -19,6 +19,7 @@ from sqlalchemy import (
     create_engine,
     delete,
     select,
+    text,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -33,8 +34,16 @@ _DB_URL = (
 if _DB_URL.startswith("postgres://"):
     _DB_URL = _DB_URL.replace("postgres://", "postgresql://", 1)
 
-_engine = create_engine(_DB_URL, future=True)
-_metadata = MetaData()
+# pool_pre_ping revalidates pooled connections (Supabase's pooler recycles
+# idle ones), so a stale connection becomes a reconnect, not a 500.
+_engine = create_engine(_DB_URL, future=True, pool_pre_ping=True)
+
+# On Postgres (e.g. Supabase) keep our tables OUT of the `public` schema:
+# Supabase exposes `public` through its PostgREST API, and OAuth tokens must
+# never be reachable that way. A dedicated schema is invisible to PostgREST.
+PRIVATE_SCHEMA = "xamio" if _engine.dialect.name == "postgresql" else None
+
+_metadata = MetaData(schema=PRIVATE_SCHEMA)
 
 _google_tokens = Table(
     "google_oauth_tokens",
@@ -44,6 +53,9 @@ _google_tokens = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+if PRIVATE_SCHEMA:
+    with _engine.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PRIVATE_SCHEMA}"'))
 _metadata.create_all(_engine)
 
 

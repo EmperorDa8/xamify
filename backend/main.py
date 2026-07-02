@@ -1,6 +1,6 @@
 import os
 import secrets
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, RedirectResponse
 from dotenv import load_dotenv
@@ -21,6 +21,7 @@ from services.google_calendar import get_auth_url, exchange_code, sync_exams_to_
 from services.email_service import send_summary_email
 from services import scheduler
 from services import token_store
+from services.auth import require_user
 
 load_dotenv()
 
@@ -112,6 +113,7 @@ async def parse(
     file: UploadFile = File(...),
     courses_file: UploadFile | None = File(None),
     courses_text: str = Form(""),
+    user: dict = Depends(require_user),
 ):
     allowed = {"pdf", "png", "jpg", "jpeg", "webp", "tiff", "bmp", "xlsx", "xls", "csv", "docx", "txt"}
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
@@ -151,7 +153,7 @@ async def parse(
 
 
 @app.post("/download/ics")
-async def download_ics(body: SyncRequest):
+async def download_ics(body: SyncRequest, user: dict = Depends(require_user)):
     _validate_exam_schedule(body.exams)
     ics_bytes = build_ics(body.exams, body.reminder_minutes, body.timezone)
     return Response(
@@ -163,7 +165,9 @@ async def download_ics(body: SyncRequest):
 
 @app.post("/alerts/email", response_model=EmailAlertResult)
 @limiter.limit("5/minute")
-async def email_alerts(request: Request, body: EmailAlertRequest):
+async def email_alerts(
+    request: Request, body: EmailAlertRequest, user: dict = Depends(require_user)
+):
     if not body.exams:
         raise HTTPException(status_code=400, detail="No exams to send.")
     _validate_exam_schedule(body.exams)
@@ -177,18 +181,26 @@ async def email_alerts(request: Request, body: EmailAlertRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not send email: {e}")
 
-    return EmailAlertResult(
-        success=True,
-        message=(
+    if scheduled:
+        message = (
             f"Summary sent to {body.email}. "
             f"{scheduled} reminder email(s) scheduled before your exams."
-        ),
-        scheduled=scheduled,
-    )
+        )
+    else:
+        # No timed reminders were scheduled — either every lead time has already
+        # passed, or this host can't run the background scheduler (e.g. a
+        # serverless deploy). Don't promise reminders we won't send.
+        message = (
+            f"Summary sent to {body.email} with your full schedule attached. "
+            "Timed reminder emails aren't available right now — add the .ics or "
+            "sync to Google Calendar to get alerts before each exam."
+        )
+
+    return EmailAlertResult(success=True, message=message, scheduled=scheduled)
 
 
 @app.get("/auth/google", response_model=GoogleAuthResponse)
-def google_auth():
+def google_auth(user: dict = Depends(require_user)):
     if not os.getenv("GOOGLE_CLIENT_ID"):
         raise HTTPException(status_code=501, detail="Google Calendar not configured. Add GOOGLE_CLIENT_ID to .env")
     return {"auth_url": get_auth_url()}
@@ -215,7 +227,9 @@ async def google_callback(code: str, request: Request):
 
 
 @app.post("/sync/google", response_model=SyncResult)
-async def sync_google(body: SyncRequest, request: Request):
+async def sync_google(
+    body: SyncRequest, request: Request, user: dict = Depends(require_user)
+):
     session_key = request.cookies.get("exam_sync_session")
     creds = token_store.get_credentials(session_key)
     if not creds:
@@ -234,7 +248,7 @@ async def sync_google(body: SyncRequest, request: Request):
 
 
 @app.get("/auth/google/status")
-def google_status(request: Request):
+def google_status(request: Request, user: dict = Depends(require_user)):
     session_key = request.cookies.get("exam_sync_session")
     connected = token_store.has_credentials(session_key)
     return {"connected": connected}

@@ -3,11 +3,26 @@ services:
     name: xamify-backend
     runtime: python
     buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    # --proxy-headers so uvicorn trusts Render's X-Forwarded-For; without it the
+    # per-IP rate limiter sees every client as the same proxy IP (one global
+    # bucket for all users instead of per-user limits).
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips=*
     envVars:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      # Enables API auth (JWT verification via the project's JWKS endpoint).
+      # Non-secret, e.g. https://<project-ref>.supabase.co
+      - key: SUPABASE_URL
+        sync: false
+      # Only needed instead of SUPABASE_URL if the project still signs tokens
+      # with the legacy HS256 shared secret.
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      # Postgres for reminder jobs + Google tokens (Supabase session-pooler URI).
+      # Render's free-tier disk is ephemeral — SQLite there is wiped per deploy.
+      - key: DATABASE_URL
         sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
