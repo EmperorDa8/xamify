@@ -1,6 +1,7 @@
-from datetime import timedelta
+# timezone aliased: build_ics has a `timezone: str` parameter that would
+# otherwise shadow the datetime module's timezone.
+from datetime import datetime, timedelta, timezone as dt_timezone
 from icalendar import Calendar, Event, Alarm
-import uuid
 from models import ExamEntry
 from services.datetime_utils import parse_exam_datetime_in_timezone
 
@@ -20,7 +21,10 @@ def build_ics(exams: list[ExamEntry], reminder_minutes: list[int], timezone: str
         dt_end = dt_start + timedelta(minutes=exam.duration_minutes or 120)
 
         event = Event()
-        event.add("uid", str(uuid.uuid4()))
+        # Deterministic UID: re-importing the same schedule updates events
+        # in place rather than creating duplicates in the calendar app.
+        event.add("uid", f"{exam.stable_key()}@xamio.app")
+        event.add("dtstamp", datetime.now(dt_timezone.utc))
 
         event.add("dtstart", dt_start)
         event.add("dtend", dt_end)

@@ -17,7 +17,7 @@ from models import (
 )
 from services.parser import parse_timetable
 from services.ical_service import build_ics
-from services.google_calendar import get_auth_url, exchange_code, sync_exams_to_google
+from services.google_calendar import get_auth_url_and_state, exchange_code, sync_exams_to_google
 from services.email_service import send_summary_email
 from services import scheduler
 from services import token_store
@@ -45,6 +45,11 @@ def _shutdown():
     scheduler.shutdown()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# In production the frontend (xamio.app) calls this API cross-site
+# (onrender.com), and browsers only attach cross-site XHR cookies when they are
+# SameSite=None; Secure. Local dev over http://localhost stays Lax (same-site).
+_SECURE_COOKIES = FRONTEND_URL.startswith("https")
 
 # Allow the configured production frontend plus localhost. The production site
 # is served from the xamio.app custom domain; Vercel also issues a new preview
@@ -170,6 +175,14 @@ async def email_alerts(
 ):
     if not body.exams:
         raise HTTPException(status_code=400, detail="No exams to send.")
+    # With auth enforced, only send to the signed-in user's own address — this
+    # endpoint must not double as a spam relay for arbitrary recipients.
+    token_email = (user.get("email") or "").strip().lower()
+    if token_email and body.email.strip().lower() != token_email:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Alerts can only be sent to your sign-in email ({token_email}).",
+        )
     _validate_exam_schedule(body.exams)
     try:
         send_summary_email(body.email, body.exams, body.reminder_minutes, body.timezone)
@@ -200,14 +213,46 @@ async def email_alerts(
 
 
 @app.get("/auth/google", response_model=GoogleAuthResponse)
-def google_auth(user: dict = Depends(require_user)):
+def google_auth(request: Request, user: dict = Depends(require_user)):
     if not os.getenv("GOOGLE_CLIENT_ID"):
         raise HTTPException(status_code=501, detail="Google Calendar not configured. Add GOOGLE_CLIENT_ID to .env")
-    return {"auth_url": get_auth_url()}
+    # Hand back our own /start URL: the browser navigates there top-level, so
+    # the CSRF state cookie is set first-party on this origin before Google.
+    base = str(request.base_url).rstrip("/")
+    return {"auth_url": f"{base}/auth/google/start"}
+
+
+@app.get("/auth/google/start")
+def google_auth_start():
+    """Top-level navigation target: stamp the CSRF state cookie, then redirect
+    to Google's consent screen. No auth needed — starting a consent flow has no
+    side effects and the client id is public anyway."""
+    if not os.getenv("GOOGLE_CLIENT_ID"):
+        raise HTTPException(status_code=501, detail="Google Calendar not configured. Add GOOGLE_CLIENT_ID to .env")
+    auth_url, state = get_auth_url_and_state()
+    response = RedirectResponse(auth_url)
+    response.set_cookie(
+        "oauth_state",
+        state,
+        httponly=True,
+        samesite="lax",  # sent on the top-level redirect back from Google
+        secure=_SECURE_COOKIES,
+        max_age=600,
+    )
+    return response
 
 
 @app.get("/auth/google/callback")
-async def google_callback(code: str, request: Request):
+async def google_callback(code: str, request: Request, state: str | None = None):
+    # CSRF check: the state Google echoes back must match the cookie stamped by
+    # /auth/google/start in this same browser — otherwise an attacker could
+    # bind THEIR Google account to the victim's session.
+    expected_state = request.cookies.get("oauth_state")
+    if not expected_state or not state or not secrets.compare_digest(expected_state, state):
+        raise HTTPException(
+            status_code=400,
+            detail="OAuth state mismatch — restart the Google Calendar connection from the app.",
+        )
     try:
         creds = exchange_code(code)
         # Persist credentials keyed to the session cookie so they survive restarts.
@@ -218,10 +263,15 @@ async def google_callback(code: str, request: Request):
             "exam_sync_session",
             session_key,
             httponly=True,
-            samesite="lax",
+            # None+Secure so later cross-site XHRs (sync/status) include it.
+            samesite="none" if _SECURE_COOKIES else "lax",
+            secure=_SECURE_COOKIES,
             max_age=60 * 60 * 24 * 7,
         )
+        response.delete_cookie("oauth_state")
         return response
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

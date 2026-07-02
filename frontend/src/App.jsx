@@ -266,9 +266,10 @@ export default function App() {
               <CalendarSync
                 exams={selectedExams}
                 reminders={reminders}
-                onSuccess={() => {
+                defaultEmail={user.email || ""}
+                onSuccess={(channel) => {
                   setSynced(true);
-                  logEvent("sync", { exams: selectedExams.length });
+                  logEvent("sync", { exams: selectedExams.length, channel: channel || null });
                 }}
               />
               <div className="row-between">

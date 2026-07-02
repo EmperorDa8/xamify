@@ -26,10 +26,12 @@ def get_flow() -> Flow:
     )
 
 
-def get_auth_url() -> str:
+def get_auth_url_and_state() -> tuple[str, str]:
+    """Return (consent_url, state). The caller stores `state` in a cookie and
+    verifies Google echoes it back on the callback (CSRF protection)."""
     flow = get_flow()
-    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
-    return auth_url
+    auth_url, state = flow.authorization_url(prompt="consent", access_type="offline")
+    return auth_url, state
 
 
 def exchange_code(code: str) -> dict:
@@ -76,6 +78,7 @@ def sync_exams_to_google(
             description_parts.append(f"Venue: {exam.venue}")
         description_parts.append(f"Duration: {exam.duration_minutes or 120} minutes")
 
+        exam_key = exam.stable_key()
         event_body = {
             "summary": f"EXAM: {exam.course_code}",
             "description": "\n".join(description_parts),
@@ -87,11 +90,33 @@ def sync_exams_to_google(
                     {"method": "popup", "minutes": m} for m in reminder_minutes
                 ],
             },
+            # Tag the event so a re-sync can find and update it (see below).
+            "extendedProperties": {"private": {"xamioKey": exam_key}},
         }
         if exam.venue:
             event_body["location"] = exam.venue
 
-        created = service.events().insert(calendarId="primary", body=event_body).execute()
+        # Idempotent sync: if we already created an event for this exam
+        # (same course+date tag), update it in place instead of inserting a
+        # duplicate every time the user clicks "Sync".
+        existing = (
+            service.events()
+            .list(
+                calendarId="primary",
+                privateExtendedProperty=f"xamioKey={exam_key}",
+                maxResults=1,
+            )
+            .execute()
+            .get("items", [])
+        )
+        if existing:
+            created = (
+                service.events()
+                .update(calendarId="primary", eventId=existing[0]["id"], body=event_body)
+                .execute()
+            )
+        else:
+            created = service.events().insert(calendarId="primary", body=event_body).execute()
         event_ids.append(created["id"])
 
     return event_ids

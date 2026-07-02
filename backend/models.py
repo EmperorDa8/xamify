@@ -1,3 +1,5 @@
+import hashlib
+import re
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
@@ -15,6 +17,13 @@ class ExamEntry(BaseModel):
     #   None  -> not checked
     date_verified: Optional[bool] = None
     date_note: Optional[str] = None  # human-readable explanation when not a clean match
+
+    def stable_key(self) -> str:
+        """Stable identity for calendar exports: same course+date -> same key,
+        so a re-export UPDATES the existing event instead of duplicating it
+        (used as the ICS UID and as the Google event tag)."""
+        code = re.sub(r"[^a-z0-9]", "", (self.course_code or "").lower())
+        return hashlib.sha1(f"{code}|{self.date}".encode()).hexdigest()
 
 
 class ParsedTimetable(BaseModel):
