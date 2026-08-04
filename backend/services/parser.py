@@ -9,13 +9,30 @@ from models import ExamEntry, ParsedTimetable
 from services.datetime_utils import normalize_date, normalize_time, find_date_anchors
 
 
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-8")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-super-120b-a12b:free")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT_SECONDS", "45"))
 
+_anthropic_client = None
 _openrouter_client = None
 _gemini_client = None
+
+
+def get_anthropic_client():
+    """Lazily construct the Anthropic client so a missing API key surfaces as a
+    clean request-time error, not a startup crash."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise ValueError(
+                "ANTHROPIC_API_KEY is not set. Add it to backend/.env to parse timetables."
+            )
+        import anthropic
+
+        _anthropic_client = anthropic.Anthropic()
+    return _anthropic_client
 
 
 def get_openrouter_client():
@@ -91,6 +108,48 @@ def _call_openrouter(prompt: str) -> str:
         err = getattr(completion, "error", None) or getattr(completion, "model_extra", None)
         raise RuntimeError(f"OpenRouter returned no choices: {err}")
     return (completion.choices[0].message.content or "").strip()
+
+
+# Structured-output schema: the API guarantees the response is valid JSON
+# matching this shape, so no code-fence/<think> stripping is ever needed.
+EXAM_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "exams": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "course_code": {"type": "string"},
+                    "course_name": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "date": {"type": "string"},
+                    "time": {"type": "string"},
+                    "duration_minutes": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "venue": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+                "required": [
+                    "course_code", "course_name", "date",
+                    "time", "duration_minutes", "venue",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["exams"],
+    "additionalProperties": False,
+}
+
+
+def _call_claude(prompt: str) -> str:
+    client = get_anthropic_client()
+    response = client.with_options(timeout=LLM_TIMEOUT).messages.create(
+        model=ANTHROPIC_MODEL,
+        max_tokens=8192,
+        thinking={"type": "adaptive"},
+        output_config={"format": {"type": "json_schema", "schema": EXAM_JSON_SCHEMA}},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return next((b.text for b in response.content if b.type == "text"), "").strip()
 
 
 def _call_gemini(prompt: str) -> str:
@@ -496,16 +555,18 @@ def _exams_from_content(content: str) -> list[ExamEntry]:
 
 
 def parse_with_claude(raw_text: str, registered: list[str]) -> tuple[list[ExamEntry], str]:
-    """Extract exams from the timetable text. Tries OpenRouter first; if it errors
-    OR returns zero exams, falls back to Gemini. Returns (exams, model_used)."""
+    """Extract exams from the timetable text. Tries Claude first (schema-guaranteed
+    JSON via structured outputs); if it errors OR returns zero exams, falls back
+    to Gemini, then OpenRouter. Returns (exams, model_used)."""
     prompt = build_prompt(raw_text, registered)
     providers = [
+        ("claude", _call_claude, ANTHROPIC_MODEL),
         ("gemini", _call_gemini, GEMINI_MODEL),
         ("openrouter", _call_openrouter, OPENROUTER_MODEL),
     ]
 
     errors = []
-    last_model = GEMINI_MODEL
+    last_model = ANTHROPIC_MODEL
     for name, call, model in providers:
         try:
             content = call(prompt)
