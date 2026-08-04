@@ -43,3 +43,23 @@ def ensure_schema() -> None:
         return
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{PRIVATE_SCHEMA}"'))
+
+
+_prepared: set[int] = set()
+
+
+def prepare(metadata) -> None:
+    """Create the private schema and this metadata's tables, once per process.
+
+    Deliberately lazy. Doing this at import time meant a wrong DATABASE_URL took
+    the entire service down at startup — uvicorn exited before binding a port,
+    so /health and /parse died too even though neither touches Postgres. A
+    database misconfiguration should fail the requests that need the database,
+    not the whole API.
+    """
+    key = id(metadata)
+    if key in _prepared:
+        return
+    ensure_schema()
+    metadata.create_all(engine, checkfirst=True)
+    _prepared.add(key)

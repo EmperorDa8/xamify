@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta
@@ -38,9 +39,18 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.on_event("startup")
 def _startup():
-    # Only ensures the queue table exists. Delivery no longer depends on
-    # anything running inside this process — see services/reminder_queue.py.
-    reminder_queue.init()
+    # Warm the queue table. Failure is logged, never fatal: a bad DATABASE_URL
+    # must not stop the service binding a port, or /health and /parse go down
+    # with it even though neither touches Postgres. The tables are created
+    # lazily on first use anyway (services/db.prepare).
+    try:
+        reminder_queue.init()
+    except Exception as e:
+        logging.getLogger("xamio").error(
+            "Database unavailable at startup — reminders and Google Calendar "
+            "sync will fail until DATABASE_URL is correct. Error: %s",
+            e,
+        )
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 

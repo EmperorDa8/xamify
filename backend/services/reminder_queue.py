@@ -31,7 +31,7 @@ from sqlalchemy import (
 
 from models import ExamEntry
 from services.datetime_utils import parse_exam_datetime_in_timezone
-from services.db import IS_POSTGRES, PRIVATE_SCHEMA, engine, ensure_schema
+from services.db import IS_POSTGRES, PRIVATE_SCHEMA, engine, prepare
 
 # How many reminders one dispatch run will send. Keeps a single invocation well
 # inside any request timeout; the next tick picks up whatever is left.
@@ -74,9 +74,11 @@ reminder_queue = Table(
 def init() -> None:
     """Create the schema and table if missing. On Postgres the migration has
     already made them, so this is a no-op there; it is what lets local SQLite
-    dev work without running migrations."""
-    ensure_schema()
-    _metadata.create_all(engine, checkfirst=True)
+    dev work without running migrations.
+
+    Safe to call repeatedly — it runs at most once per process.
+    """
+    prepare(_metadata)
 
 
 def _now() -> datetime:
@@ -115,6 +117,7 @@ def enqueue(
     while it is still pending, so an already-delivered reminder is never
     resurrected.
     """
+    init()
     now = _now()
     values = {
         "channel": channel,
@@ -198,6 +201,7 @@ def schedule_exam_reminders(
 
 def reclaim_stalled() -> int:
     """Return rows stuck in 'sending' (process died mid-send) to the queue."""
+    init()
     cutoff = _now() - STALLED_AFTER
     with engine.begin() as conn:
         result = conn.execute(
@@ -219,6 +223,7 @@ def claim_due(limit: int = BATCH_SIZE) -> list[dict]:
     On Postgres the claim uses FOR UPDATE SKIP LOCKED, so two overlapping
     dispatch runs take disjoint sets and a reminder can never be sent twice.
     """
+    init()
     now = _now()
 
     with engine.begin() as conn:
@@ -315,6 +320,7 @@ def cancel_for_schedule(schedule_id: str) -> int:
     """Drop the pending reminders for a schedule. Used when a re-uploaded
     timetable moves or removes exams, so nobody is reminded about a sitting
     that no longer exists."""
+    init()
     with engine.begin() as conn:
         result = conn.execute(
             update(reminder_queue)
@@ -331,6 +337,7 @@ def cancel_for_schedule(schedule_id: str) -> int:
 
 def stats() -> dict:
     """Queue health — what the old scheduler could never tell you."""
+    init()
     with engine.connect() as conn:
         rows = conn.execute(
             select(reminder_queue.c.status, func.count().label("n")).group_by(

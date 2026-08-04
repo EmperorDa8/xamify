@@ -19,7 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from services.db import PRIVATE_SCHEMA, engine as _engine, ensure_schema
+from services.db import PRIVATE_SCHEMA, engine as _engine, prepare
 
 _metadata = MetaData(schema=PRIVATE_SCHEMA)
 
@@ -31,11 +31,14 @@ _google_tokens = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
-ensure_schema()
-_metadata.create_all(_engine)
+def _ready() -> None:
+    """Create the table on first use. Not at import: a bad DATABASE_URL must not
+    stop the API from booting (see services.db.prepare)."""
+    prepare(_metadata)
 
 
 def save_credentials(session_key: str, credentials: dict) -> None:
+    _ready()
     payload = json.dumps(credentials)
     now = datetime.now(dt_timezone.utc)
     with _engine.begin() as conn:
@@ -65,6 +68,7 @@ def save_credentials(session_key: str, credentials: dict) -> None:
 def get_credentials(session_key: str | None) -> dict | None:
     if not session_key:
         return None
+    _ready()
     with _engine.connect() as conn:
         row = conn.execute(
             select(_google_tokens.c.credentials).where(
@@ -81,6 +85,7 @@ def has_credentials(session_key: str | None) -> bool:
 
 
 def delete_credentials(session_key: str) -> None:
+    _ready()
     with _engine.begin() as conn:
         conn.execute(
             delete(_google_tokens).where(_google_tokens.c.session_key == session_key)
