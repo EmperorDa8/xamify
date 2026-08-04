@@ -115,8 +115,8 @@ def send_summary_email(
 
 
 def send_reminder_email(to: str, exam: dict) -> None:
-    """A single reminder, fired by the scheduler ahead of an exam. `exam` is a
-    plain dict so it pickles cleanly into the persistent job store."""
+    """A single reminder, sent by the dispatcher ahead of an exam. `exam` is a
+    plain dict — it round-trips through the queue row's JSON payload."""
     code = exam.get("course_code", "Exam")
     name = exam.get("course_name")
     date = exam.get("date", "")

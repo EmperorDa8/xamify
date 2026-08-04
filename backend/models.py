@@ -41,6 +41,11 @@ class SyncRequest(BaseModel):
     exams: list[ExamEntry]
     reminder_minutes: list[int] = Field(default_factory=lambda: [1440, 180])  # 1 day + 3 hours before
     timezone: str = "UTC"  # IANA tz from the browser, e.g. "Africa/Lagos"
+    # stable_key()s of exams that no longer exist (dropped courses, or the OLD
+    # date of an exam the university moved). Their calendar events are deleted
+    # on sync — otherwise the old date lingers as a phantom exam, because the
+    # key is derived from course code + date and a move produces a new one.
+    stale_keys: list[str] = Field(default_factory=list)
 
 
 class EmailAlertRequest(BaseModel):
@@ -54,6 +59,8 @@ class EmailAlertResult(BaseModel):
     success: bool
     message: str
     scheduled: int = 0
+    # Non-blocking schedule notes (e.g. two exams overlapping on one day).
+    warnings: list[str] = Field(default_factory=list)
 
 
 class GoogleAuthResponse(BaseModel):
@@ -64,3 +71,5 @@ class SyncResult(BaseModel):
     success: bool
     message: str
     event_ids: list[str] = Field(default_factory=list)
+    # Non-blocking schedule notes (e.g. two exams overlapping on one day).
+    warnings: list[str] = Field(default_factory=list)
