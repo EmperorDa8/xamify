@@ -1,9 +1,19 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-const API = "http://localhost:8000";
+// Same base as App.jsx: the deployed API (VITE_API_URL) or the same-origin
+// "/api" proxy. Hardcoding localhost here broke calendar/ics/email in prod.
+const API = import.meta.env.VITE_API_URL || "/api";
 
-export default function CalendarSync({ exams, reminders, onSuccess, defaultEmail = "" }) {
+export default function CalendarSync({
+  exams,
+  reminders,
+  onSuccess,
+  defaultEmail = "",
+  // Calendar keys for exams that moved or were dropped since the last upload —
+  // the backend deletes those events so an old date can't linger.
+  staleKeys = [],
+}) {
   const [googleConnected, setGoogleConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -41,10 +51,10 @@ export default function CalendarSync({ exams, reminders, onSuccess, defaultEmail
     try {
       const { data } = await axios.post(
         `${API}/sync/google`,
-        { exams, reminder_minutes: reminders, timezone },
+        { exams, reminder_minutes: reminders, timezone, stale_keys: staleKeys },
         { withCredentials: true },
       );
-      setMessage({ type: "success", text: data.message });
+      setMessage({ type: "success", text: data.message, notes: data.warnings });
       onSuccess?.("google");
     } catch (e) {
       setMessage({ type: "error", text: e.response?.data?.detail || "Sync failed." });
@@ -86,7 +96,7 @@ export default function CalendarSync({ exams, reminders, onSuccess, defaultEmail
         { email, exams, reminder_minutes: reminders, timezone },
         { withCredentials: true },
       );
-      setMessage({ type: "success", text: data.message });
+      setMessage({ type: "success", text: data.message, notes: data.warnings });
       onSuccess?.("email");
     } catch (e) {
       let text;
@@ -176,6 +186,21 @@ export default function CalendarSync({ exams, reminders, onSuccess, defaultEmail
         <div className={`alert ${message.type}`} style={{ marginTop: 18 }}>
           <span className="glyph">{message.type === "success" ? "✓" : "!"}</span>
           <span>{message.text}</span>
+        </div>
+      )}
+
+      {/* Non-blocking schedule notes from the backend — e.g. two exams whose
+          times overlap on the same day. The export already went through; this
+          is a nudge to double-check, not a failure. */}
+      {message?.notes?.length > 0 && (
+        <div className="alert warn" style={{ marginTop: 12 }}>
+          <span className="glyph">⚠</span>
+          <div>
+            <b>Worth a second look:</b>
+            <ul className="warn-list">
+              {message.notes.map((note, i) => <li key={i}>{note}</li>)}
+            </ul>
+          </div>
         </div>
       )}
     </div>

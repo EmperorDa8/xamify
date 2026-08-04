@@ -1,3 +1,5 @@
+import hashlib
+import re
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
@@ -16,6 +18,13 @@ class ExamEntry(BaseModel):
     date_verified: Optional[bool] = None
     date_note: Optional[str] = None  # human-readable explanation when not a clean match
 
+    def stable_key(self) -> str:
+        """Stable identity for calendar exports: same course+date -> same key,
+        so a re-export UPDATES the existing event instead of duplicating it
+        (used as the ICS UID and as the Google event tag)."""
+        code = re.sub(r"[^a-z0-9]", "", (self.course_code or "").lower())
+        return hashlib.sha1(f"{code}|{self.date}".encode()).hexdigest()
+
 
 class ParsedTimetable(BaseModel):
     model_config = ConfigDict(protected_namespaces=())  # allow the "model_used" field
@@ -32,6 +41,11 @@ class SyncRequest(BaseModel):
     exams: list[ExamEntry]
     reminder_minutes: list[int] = Field(default_factory=lambda: [1440, 180])  # 1 day + 3 hours before
     timezone: str = "UTC"  # IANA tz from the browser, e.g. "Africa/Lagos"
+    # stable_key()s of exams that no longer exist (dropped courses, or the OLD
+    # date of an exam the university moved). Their calendar events are deleted
+    # on sync — otherwise the old date lingers as a phantom exam, because the
+    # key is derived from course code + date and a move produces a new one.
+    stale_keys: list[str] = Field(default_factory=list)
 
 
 class EmailAlertRequest(BaseModel):
@@ -45,6 +59,8 @@ class EmailAlertResult(BaseModel):
     success: bool
     message: str
     scheduled: int = 0
+    # Non-blocking schedule notes (e.g. two exams overlapping on one day).
+    warnings: list[str] = Field(default_factory=list)
 
 
 class GoogleAuthResponse(BaseModel):
@@ -55,3 +71,5 @@ class SyncResult(BaseModel):
     success: bool
     message: str
     event_ids: list[str] = Field(default_factory=list)
+    # Non-blocking schedule notes (e.g. two exams overlapping on one day).
+    warnings: list[str] = Field(default_factory=list)

@@ -1,12 +1,10 @@
 """Persistent store for per-session Google OAuth credentials.
 
 Replaces the previous in-memory dict so authenticated Google sessions survive a
-backend restart. Backed by SQLAlchemy, so it works on SQLite today (Render free
-tier) and can move to Postgres later by setting DATABASE_URL / SCHEDULER_DB_URL —
-no code change required.
+backend restart. Uses the shared engine in services.db, so one DATABASE_URL
+moves this and the reminder queue to Postgres together.
 """
 import json
-import os
 from datetime import datetime, timezone as dt_timezone
 
 from sqlalchemy import (
@@ -16,25 +14,14 @@ from sqlalchemy import (
     String,
     Table,
     Text,
-    create_engine,
     delete,
     select,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-# Share the scheduler's DB so a single Postgres URL upgrades both later.
-_DB_URL = (
-    os.getenv("DATABASE_URL")
-    or os.getenv("SCHEDULER_DB_URL")
-    or "sqlite:///reminders.sqlite"
-)
+from services.db import PRIVATE_SCHEMA, engine as _engine, ensure_schema
 
-# SQLAlchemy needs the postgres:// scheme spelled postgresql://
-if _DB_URL.startswith("postgres://"):
-    _DB_URL = _DB_URL.replace("postgres://", "postgresql://", 1)
-
-_engine = create_engine(_DB_URL, future=True)
-_metadata = MetaData()
+_metadata = MetaData(schema=PRIVATE_SCHEMA)
 
 _google_tokens = Table(
     "google_oauth_tokens",
@@ -44,6 +31,7 @@ _google_tokens = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+ensure_schema()
 _metadata.create_all(_engine)
 
 

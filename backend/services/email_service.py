@@ -41,6 +41,15 @@ def _send_via_resend(to: str, subject: str, text: str, ics_bytes: bytes | None) 
             resp.read()
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
+        # Resend rejects any recipient other than the account owner until a
+        # sending domain is verified. Surface a clear, user-friendly message
+        # (raised as ValueError -> 501) instead of a raw API dump.
+        if e.code == 403 and ("verify a domain" in detail or "your own email address" in detail):
+            raise ValueError(
+                "Email alerts aren't available for this address yet. For now, use "
+                "“Download .ics” or “Connect Google Calendar” to add your exams — "
+                "email reminders for everyone are coming soon."
+            )
         raise RuntimeError(f"Resend API error {e.code}: {detail}")
 
 
@@ -106,8 +115,8 @@ def send_summary_email(
 
 
 def send_reminder_email(to: str, exam: dict) -> None:
-    """A single reminder, fired by the scheduler ahead of an exam. `exam` is a
-    plain dict so it pickles cleanly into the persistent job store."""
+    """A single reminder, sent by the dispatcher ahead of an exam. `exam` is a
+    plain dict — it round-trips through the queue row's JSON payload."""
     code = exam.get("course_code", "Exam")
     name = exam.get("course_name")
     date = exam.get("date", "")

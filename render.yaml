@@ -3,11 +3,41 @@ services:
     name: xamify-backend
     runtime: python
     buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    # --proxy-headers so uvicorn trusts Render's X-Forwarded-For; without it the
+    # per-IP rate limiter sees every client as the same proxy IP (one global
+    # bucket for all users instead of per-user limits).
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips=*
     envVars:
+      # Primary timetable parser (Claude API); OpenRouter/Gemini are fallbacks.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: OPENROUTER_API_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      # Enables API auth (JWT verification via the project's JWKS endpoint).
+      # Non-secret, e.g. https://<project-ref>.supabase.co
+      - key: SUPABASE_URL
+        sync: false
+      # Only needed instead of SUPABASE_URL if the project still signs tokens
+      # with the legacy HS256 shared secret.
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      # Postgres for the reminder queue + Google tokens (Supabase session-pooler
+      # URI). REQUIRED: Render's free-tier disk is ephemeral, so SQLite there is
+      # wiped on every deploy — taking queued reminders with it.
+      - key: DATABASE_URL
+        sync: false
+      # Shared secret for /tasks/dispatch-reminders. Must match the value the
+      # Supabase pg_cron job sends as X-Task-Key. Without it dispatch is
+      # disabled (503) rather than left open to the internet.
+      - key: TASK_SECRET
+        sync: false
+      # Email delivery. Render blocks outbound SMTP, so the Resend HTTP API is
+      # what actually sends reminders in production.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
         sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false

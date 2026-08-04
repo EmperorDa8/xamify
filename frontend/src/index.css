@@ -417,7 +417,9 @@ body::before {
 /* upload zone */
 .upload-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  /* Registered-courses card first (narrow, left), timetable dropzone second
+     (wide, right) — guide users to enter courses before uploading. */
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
   gap: 18px;
   align-items: stretch;
 }
@@ -536,6 +538,8 @@ body::before {
 .alert.error { background: rgba(237, 111, 92, 0.1); border: 1px solid rgba(237, 111, 92, 0.3); color: #b8412e; }
 .alert.success { background: rgba(110, 116, 72, 0.12); border: 1px solid rgba(110, 116, 72, 0.3); color: var(--olive); }
 .alert.warn { background: rgba(214, 158, 46, 0.1); border: 1px solid rgba(214, 158, 46, 0.35); color: #8a6400; }
+.alert.info { background: rgba(20, 20, 20, 0.04); border: 1px solid var(--line); color: inherit; }
+.alert.info .link-back { padding: 0; }
 .warn-list { margin: 6px 0 8px; padding-left: 18px; }
 .warn-list li { margin: 2px 0; }
 
@@ -1082,4 +1086,123 @@ table.exams td { padding: 10px 16px; vertical-align: middle; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lp-hero-head, .lp-icard, .lp-ticker-row { animation: none; }
+}
+
+/* ── dashboard: the countdown home for a student who already has a schedule ── */
+.dash-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.dash-head h1 {
+  font-family: var(--sans);
+  font-size: clamp(34px, 5vw, 56px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  margin-top: 14px;
+}
+.dash-head h1 .dot { color: var(--coral); }
+.dash-actions { border-top: 1px solid var(--line-soft); padding-top: 24px; }
+
+.next-exam {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--coral);
+  border-radius: 14px;
+  background: var(--bone);
+  padding: 28px 32px;
+  box-shadow: var(--shadow);
+}
+.ne-code { font-family: var(--mono); font-size: 30px; font-weight: 500; letter-spacing: -0.01em; margin-top: 6px; }
+.ne-name { font-family: var(--body); font-size: 15px; color: var(--ink-mute); margin-top: 2px; }
+.ne-when { font-family: var(--sans); font-size: 15px; font-weight: 600; color: var(--ink-soft); margin-top: 10px; }
+.ne-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; line-height: 1; }
+.ne-count { font-family: var(--sans); font-size: clamp(46px, 7vw, 76px); font-weight: 900; letter-spacing: -0.045em; color: var(--coral); }
+.ne-unit { font-family: var(--serif); font-style: italic; font-size: 20px; color: var(--ink-mute); margin-top: 6px; }
+.ne-detail { font-family: var(--body); font-size: 13px; color: var(--ink-faint); margin-top: 4px; }
+
+.exam-feed { list-style: none; border-top: 1px solid var(--line-soft); }
+.exam-feed li {
+  display: grid;
+  grid-template-columns: 130px 1fr 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--line-faint);
+}
+.ef-code { font-family: var(--mono); font-size: 14px; font-weight: 500; }
+.ef-when { font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--ink-soft); }
+.ef-venue { font-family: var(--body); font-size: 13px; color: var(--ink-mute); }
+.ef-away { font-family: var(--serif); font-style: italic; font-size: 14px; color: var(--coral); white-space: nowrap; }
+.exam-feed.done li { opacity: 0.5; }
+.exam-feed.done .ef-away { color: var(--olive); }
+
+.past-exams summary {
+  font-family: var(--sans);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: 8px 0;
+}
+.past-exams summary:hover { color: var(--coral); }
+.past-exams[open] summary { margin-bottom: 8px; }
+
+/* ── change detection: what a re-uploaded timetable moved ── */
+.changes {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--mustard);
+  border-radius: 14px;
+  background: var(--bone);
+  padding: 24px 28px;
+}
+.changes-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.changes-tally {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-mute);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+.change-list { list-style: none; }
+.ch {
+  display: grid;
+  grid-template-columns: 88px 120px 1fr;
+  gap: 14px;
+  align-items: baseline;
+  padding: 11px 0;
+  border-top: 1px solid var(--line-faint);
+}
+.ch-tag {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 3px 7px;
+  text-align: center;
+}
+.ch.moved   .ch-tag { background: rgba(214, 158, 46, 0.18); color: #8a6400; }
+.ch.updated .ch-tag { background: rgba(21, 20, 15, 0.07); color: var(--ink-mute); }
+.ch.added   .ch-tag { background: rgba(110, 116, 72, 0.16); color: var(--olive); }
+.ch.removed .ch-tag { background: rgba(237, 111, 92, 0.14); color: #b8412e; }
+.ch-code { font-family: var(--mono); font-size: 14px; font-weight: 500; }
+.ch-detail { display: flex; flex-wrap: wrap; gap: 14px; }
+.ch-field { font-family: var(--body); font-size: 13px; color: var(--ink-mute); }
+.ch-field s { color: var(--ink-faint); }
+.ch-field b { color: var(--ink); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .dash-head { flex-direction: column; }
+  .next-exam { flex-direction: column; align-items: flex-start; }
+  .ne-right { align-items: flex-start; text-align: left; }
+  .exam-feed li { grid-template-columns: 1fr auto; }
+  .exam-feed .ef-venue { display: none; }
+  .ch { grid-template-columns: 1fr; gap: 6px; }
+  .ch-tag { justify-self: start; }
 }
