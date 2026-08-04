@@ -48,12 +48,33 @@ def exchange_code(code: str) -> dict:
     }
 
 
+def _delete_events_by_key(service, exam_key: str) -> int:
+    """Remove every event we previously tagged with `exam_key`. Used to clear
+    out an exam that was dropped or moved to a different date."""
+    deleted = 0
+    events = (
+        service.events()
+        .list(calendarId="primary", privateExtendedProperty=f"xamioKey={exam_key}")
+        .execute()
+        .get("items", [])
+    )
+    for event in events:
+        try:
+            service.events().delete(calendarId="primary", eventId=event["id"]).execute()
+            deleted += 1
+        except Exception:
+            # An event the user already deleted themselves shouldn't fail the sync.
+            pass
+    return deleted
+
+
 def sync_exams_to_google(
     credentials_dict: dict,
     exams: list[ExamEntry],
     reminder_minutes: list[int],
     timezone: str = "UTC",
-) -> list[str]:
+    stale_keys: list[str] | None = None,
+) -> tuple[list[str], int]:
     creds = Credentials(
         token=credentials_dict["token"],
         refresh_token=credentials_dict.get("refresh_token"),
@@ -64,6 +85,16 @@ def sync_exams_to_google(
     )
     service = build("calendar", "v3", credentials=creds)
     event_ids = []
+
+    # Clear orphaned events first, so a moved exam never shows up twice — once
+    # on the old date and once on the new one.
+    removed = 0
+    live_keys = {exam.stable_key() for exam in exams}
+    for key in stale_keys or []:
+        # Guard against deleting an exam that is still in the schedule (e.g. two
+        # courses that normalise to the same key).
+        if key not in live_keys:
+            removed += _delete_events_by_key(service, key)
 
     for exam in exams:
         dt_start = parse_exam_datetime_in_timezone(exam.date, exam.time, timezone)
@@ -119,4 +150,4 @@ def sync_exams_to_google(
             created = service.events().insert(calendarId="primary", body=event_body).execute()
         event_ids.append(created["id"])
 
-    return event_ids
+    return event_ids, removed

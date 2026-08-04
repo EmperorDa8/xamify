@@ -25,7 +25,19 @@ Thumbs.db
 # Logs
 *.log
 
-# Scheduler job store
+# Reminder queue / token store (local SQLite dev database)
 *.sqlite
 
 .vercel
+
+# Fundraising material. THIS REPOSITORY IS PUBLIC — the decks, one-pager and
+# financial model carry raise terms, valuation cap and financials, and the
+# scripts/ generators embed the same figures in source. Keep them local (or in
+# a private repo); never commit them here.
+Xamio_*.pdf
+Xamio_*.pptx
+scripts/
+
+# Generated dependency-graph output
+graphify-out/
+.graphifyignore

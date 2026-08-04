@@ -1,6 +1,8 @@
+import logging
 import os
 import secrets
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Depends
+from datetime import datetime, timedelta
+from fastapi import FastAPI, UploadFile, File, Form, Header, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, RedirectResponse
 from dotenv import load_dotenv
@@ -18,8 +20,8 @@ from models import (
 from services.parser import parse_timetable
 from services.ical_service import build_ics
 from services.google_calendar import get_auth_url_and_state, exchange_code, sync_exams_to_google
-from services.email_service import send_summary_email
-from services import scheduler
+from services.email_service import send_summary_email, send_reminder_email
+from services import reminder_queue
 from services import token_store
 from services.auth import require_user
 
@@ -37,12 +39,18 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.on_event("startup")
 def _startup():
-    scheduler.start()
-
-
-@app.on_event("shutdown")
-def _shutdown():
-    scheduler.shutdown()
+    # Warm the queue table. Failure is logged, never fatal: a bad DATABASE_URL
+    # must not stop the service binding a port, or /health and /parse go down
+    # with it even though neither touches Postgres. The tables are created
+    # lazily on first use anyway (services/db.prepare).
+    try:
+        reminder_queue.init()
+    except Exception as e:
+        logging.getLogger("xamio").error(
+            "Database unavailable at startup — reminders and Google Calendar "
+            "sync will fail until DATABASE_URL is correct. Error: %s",
+            e,
+        )
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
@@ -75,35 +83,56 @@ app.add_middleware(
 )
 
 
-def _validate_exam_schedule(exams) -> None:
-    """Block calendar/email export of a schedule with invalid or clashing
-    dates. The review table lets the user fix anything flagged here, so a bad
-    date never reaches their calendar silently."""
+def _validate_exam_schedule(exams) -> list[str]:
+    """Check a schedule before it reaches a calendar or an inbox.
+
+    Hard-fails (422) only on what we genuinely cannot turn into an event: a
+    missing or unparseable date/time. The review table lets the user fix those.
+
+    Sitting two exams on one day is normal at large multi-faculty universities
+    (a morning paper and an afternoon paper), so it is NOT an error — blocking
+    it stopped those students exporting at all. Only a genuine *time overlap*
+    is reported, and as a returned warning rather than a block: an overlap is
+    usually a parse slip worth a second look, but it is the university's
+    timetable, and refusing to export it helps nobody.
+    """
     from services.datetime_utils import parse_exam_datetime
 
     problems: list[str] = []
-    by_date: dict[str, list[str]] = {}
+    warnings: list[str] = []
+    # date -> (course code, start, end) for the exams we could place in time
+    by_date: dict[str, list[tuple[str, datetime, datetime]]] = {}
+
     for exam in exams:
-        if parse_exam_datetime(exam.date, exam.time) is None:
+        start = parse_exam_datetime(exam.date, exam.time)
+        if start is None:
             problems.append(
                 f"{exam.course_code}: invalid or missing date/time "
                 f"(date={exam.date!r}, time={exam.time!r})."
             )
-        if exam.date:
-            by_date.setdefault(exam.date, []).append(exam.course_code)
-
-    for date, codes in by_date.items():
-        if len(codes) > 1:
-            problems.append(
-                f"{', '.join(codes)} share the same date ({date}). "
-                "Each course must be on its own exam day — fix the dates in the review table."
-            )
+            continue
+        end = start + timedelta(minutes=exam.duration_minutes or 120)
+        by_date.setdefault(exam.date, []).append((exam.course_code, start, end))
 
     if problems:
         raise HTTPException(
             status_code=422,
             detail="Schedule check failed: " + " | ".join(problems),
         )
+
+    for date, sittings in by_date.items():
+        if len(sittings) < 2:
+            continue
+        sittings.sort(key=lambda s: s[1])
+        for (code_a, _, end_a), (code_b, start_b, _) in zip(sittings, sittings[1:]):
+            if start_b < end_a:
+                warnings.append(
+                    f"{code_a} and {code_b} overlap on {date} "
+                    f"({code_a} runs until {end_a:%H:%M}, {code_b} starts at {start_b:%H:%M}). "
+                    "Check the times in the review table if that looks wrong."
+                )
+
+    return warnings
 
 
 @app.get("/health")
@@ -183,11 +212,15 @@ async def email_alerts(
             status_code=403,
             detail=f"Alerts can only be sent to your sign-in email ({token_email}).",
         )
-    _validate_exam_schedule(body.exams)
+    warnings = _validate_exam_schedule(body.exams)
     try:
         send_summary_email(body.email, body.exams, body.reminder_minutes, body.timezone)
-        scheduled = scheduler.schedule_exam_reminders(
-            body.email, body.exams, body.reminder_minutes, body.timezone
+        scheduled = reminder_queue.schedule_exam_reminders(
+            body.email,
+            body.exams,
+            body.reminder_minutes,
+            body.timezone,
+            user_id=user.get("sub"),
         )
     except ValueError as e:
         raise HTTPException(status_code=501, detail=str(e))
@@ -197,19 +230,86 @@ async def email_alerts(
     if scheduled:
         message = (
             f"Summary sent to {body.email}. "
-            f"{scheduled} reminder email(s) scheduled before your exams."
+            f"{scheduled} reminder email(s) queued before your exams."
         )
     else:
-        # No timed reminders were scheduled — either every lead time has already
-        # passed, or this host can't run the background scheduler (e.g. a
-        # serverless deploy). Don't promise reminders we won't send.
+        # Nothing queued now means every lead time has already passed — the only
+        # remaining reason, since queueing no longer depends on a live scheduler.
         message = (
             f"Summary sent to {body.email} with your full schedule attached. "
-            "Timed reminder emails aren't available right now — add the .ics or "
-            "sync to Google Calendar to get alerts before each exam."
+            "No timed reminders were queued because every reminder time you "
+            "chose has already passed."
         )
 
-    return EmailAlertResult(success=True, message=message, scheduled=scheduled)
+    return EmailAlertResult(
+        success=True, message=message, scheduled=scheduled, warnings=warnings
+    )
+
+
+def _require_task_key(provided: str | None) -> None:
+    """Guard for machine-triggered endpoints.
+
+    Deliberately fails CLOSED, unlike the Supabase user auth: an unconfigured
+    TASK_SECRET disables dispatch rather than leaving an endpoint that sends
+    mail to anyone who finds it.
+    """
+    secret = os.getenv("TASK_SECRET")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="Reminder dispatch is not configured. Set TASK_SECRET.",
+        )
+    if not provided or not secrets.compare_digest(provided, secret):
+        raise HTTPException(status_code=401, detail="Invalid task key.")
+
+
+@app.post("/tasks/dispatch-reminders")
+def dispatch_reminders(x_task_key: str | None = Header(default=None)):
+    """Send every reminder that has come due. Called on a schedule by pg_cron
+    via pg_net; safe to call by hand or to run twice at once.
+
+    Rows are claimed atomically before sending, so overlapping runs take
+    disjoint work and no reminder goes out twice. A send that fails goes back on
+    the queue until it runs out of attempts, so a transient email outage delays
+    delivery instead of losing it.
+    """
+    _require_task_key(x_task_key)
+
+    reclaimed = reminder_queue.reclaim_stalled()
+    due = reminder_queue.claim_due()
+
+    sent = 0
+    failed = 0
+    for item in due:
+        try:
+            if item["channel"] == "email":
+                send_reminder_email(item["destination"], item["payload"])
+            else:
+                # whatsapp/sms are queued but have no sender wired up yet.
+                raise RuntimeError(f"No sender for channel {item['channel']!r}")
+            reminder_queue.mark_sent(item["id"])
+            sent += 1
+        except Exception as e:
+            reminder_queue.mark_failed(
+                item["id"], str(e), item["attempts"], item["max_attempts"]
+            )
+            failed += 1
+
+    return {
+        "claimed": len(due),
+        "sent": sent,
+        "failed": failed,
+        "reclaimed": reclaimed,
+        "queue": reminder_queue.stats(),
+    }
+
+
+@app.get("/tasks/reminder-stats")
+def reminder_stats(x_task_key: str | None = Header(default=None)):
+    """Queue health at a glance — the old scheduler could not answer
+    "did the reminders actually go out?" at all."""
+    _require_task_key(x_task_key)
+    return reminder_queue.stats()
 
 
 @app.get("/auth/google", response_model=GoogleAuthResponse)
@@ -285,13 +385,23 @@ async def sync_google(
     if not creds:
         raise HTTPException(status_code=401, detail="Not authenticated with Google. Connect Google Calendar first.")
 
-    _validate_exam_schedule(body.exams)
+    warnings = _validate_exam_schedule(body.exams)
     try:
-        event_ids = sync_exams_to_google(creds, body.exams, body.reminder_minutes, body.timezone)
+        event_ids, removed = sync_exams_to_google(
+            creds,
+            body.exams,
+            body.reminder_minutes,
+            body.timezone,
+            stale_keys=body.stale_keys,
+        )
+        message = f"Synced {len(event_ids)} exam event(s) to Google Calendar."
+        if removed:
+            message += f" Removed {removed} event(s) for exams that moved or were dropped."
         return SyncResult(
             success=True,
-            message=f"Created {len(event_ids)} exam event(s) in Google Calendar.",
+            message=message,
             event_ids=event_ids,
+            warnings=warnings,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
