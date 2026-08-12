@@ -1069,6 +1069,41 @@ table.exams td { padding: 10px 16px; vertical-align: middle; }
 .lp-footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .lp-footer-meta { font-family: var(--sans); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-faint); }
 
+/* launch badges — their own hairline-separated row under the footer credits */
+.lp-footer-badges {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line-faint);
+}
+.lp-badge {
+  display: inline-flex;
+  line-height: 0;
+  border-radius: 8px;
+  /* the badge art is a light card; knock it back so it sits in the paper
+     palette instead of shouting over it, then bring it up on hover */
+  opacity: 0.86;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.lp-badge:hover, .lp-badge:focus-visible { opacity: 1; transform: translateY(-1px); }
+.lp-badge:focus-visible { outline: 2px solid var(--coral); outline-offset: 4px; }
+.lp-badge img {
+  display: block;
+  width: 250px;
+  max-width: 100%;
+  height: auto;
+}
+@media (max-width: 480px) {
+  .lp-badge img { width: 220px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-badge { transition: none; }
+  .lp-badge:hover, .lp-badge:focus-visible { transform: none; }
+}
+
 @keyframes lp-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
 @keyframes lp-icard-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes lp-ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
