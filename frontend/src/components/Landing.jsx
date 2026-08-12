@@ -179,6 +179,24 @@ export default function Landing({ onStart }) {
             <span className="lp-footer-meta">Upload · Review · Alerts · Sync</span>
             <span className="coord">© {new Date().getFullYear()} Xamio — never miss an exam</span>
           </div>
+
+          {/* launch-directory badge — sits on its own line so the footer row above keeps its balance */}
+          <div className="container lp-footer-badges">
+            <a
+              href="https://productwatch.io/products/xamio?utm_source=badge"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="lp-badge"
+            >
+              <img
+                src="https://productwatch.io/backend/api/v1/badge/featured?productId=4f9886c3-3497-4eb7-8939-217f21e6ba3b&darkMode=false"
+                alt="Xamio — featured on ProductWatch"
+                width="260"
+                height="54"
+                loading="lazy"
+              />
+            </a>
+          </div>
         </footer>
       </div>
     </>
